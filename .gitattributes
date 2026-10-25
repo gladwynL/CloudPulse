@@ -1,0 +1,6 @@
+# Normalize line endings so the repo behaves identically on Windows, macOS, and Linux.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.png binary
+*.ico binary
