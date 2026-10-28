@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from sqlalchemy import make_url
 
@@ -20,6 +22,13 @@ def test_database_url_built_from_components() -> None:
     assert url.drivername == "postgresql+psycopg"
     assert (url.host, url.port, url.database, url.username) == ("db", 5433, "pulse", "svc")
     assert url.password == "p@ss:word/1"
+
+
+def test_ambient_database_url_does_not_leak_into_tests() -> None:
+    # Guards the isolate_settings_env fixture: a DATABASE_URL present in the host/CI
+    # environment must not override component-based settings.
+    assert "DATABASE_URL" not in os.environ
+    assert make_url(make_settings(postgres_host="db").database_url).host == "db"
 
 
 def test_database_url_env_var_takes_precedence(monkeypatch: pytest.MonkeyPatch) -> None:

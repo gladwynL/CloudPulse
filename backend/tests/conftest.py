@@ -34,6 +34,24 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(skip)
 
 
+def _settings_env_vars() -> set[str]:
+    """Names of every environment variable ``Settings`` reads (field names and aliases)."""
+    names: set[str] = set()
+    for name, field in Settings.model_fields.items():
+        names.add((field.alias or name).upper())
+    return names
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the host/CI environment (e.g. DATABASE_URL) from leaking into any test.
+
+    Tests that need a variable set it explicitly with ``monkeypatch.setenv``.
+    """
+    for name in _settings_env_vars():
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def settings() -> Settings:
     # _env_file=None isolates tests from any developer .env file.
