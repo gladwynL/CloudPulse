@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     metrics_default_page_size: int = Field(default=50, ge=1)
     metrics_max_page_size: int = Field(default=200, ge=1, le=1000)
 
+    # --- Alerting -------------------------------------------------------------------
+    # API: bounds the work done per accepted check (every enabled rule is evaluated).
+    alerting_max_rules_per_resource: int = Field(default=20, ge=1, le=100)
+
     @field_validator("monitoring_allowed_local_hosts", mode="before")
     @classmethod
     def _split_allowed_local_hosts(cls, value: object) -> object:

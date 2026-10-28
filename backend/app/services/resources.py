@@ -20,7 +20,9 @@ from typing import NamedTuple
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.alerting.management import close_resource_incidents
 from app.core.config import Settings
+from app.models.enums import ResolutionReason
 from app.models.resource import MonitoredResource, ResourceStatus
 from app.monitoring.security import TargetNotAllowedError, TargetPolicy
 from app.repositories import resources as repo
@@ -180,6 +182,13 @@ def update_resource(
             MonitoredResource.last_checked_at, func.now()
         ) + timedelta(seconds=resource.check_interval_seconds)
 
+    if enabled_changed and not resource.is_enabled:
+        # Monitoring stopped: close active incidents explicitly and reset rule progress, in this
+        # same transaction (we hold the resource row lock).
+        close_resource_incidents(
+            session, resource_id, ResolutionReason.RESOURCE_DISABLED, reset_rules=True
+        )
+
     resource.updated_at = func.now()
     session.flush()
     session.commit()
@@ -190,5 +199,10 @@ def delete_resource(session: Session, resource_id: uuid.UUID) -> None:
     resource = repo.get(session, resource_id, for_update=True)
     if resource is None:
         raise ResourceNotFoundError
+    # History is kept: incidents survive with name snapshots (their FKs are nulled by the database),
+    # but none may stay active, so close them explicitly first. Rules cascade with the resource.
+    close_resource_incidents(
+        session, resource_id, ResolutionReason.RESOURCE_DELETED, reset_rules=False
+    )
     repo.delete(session, resource)
     session.commit()

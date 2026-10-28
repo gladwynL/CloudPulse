@@ -84,9 +84,15 @@ def test_downgrade_and_upgrade_round_trip(pg_engine: Engine) -> None:
 
 
 def test_only_the_expected_tables_are_defined(pg_engine: Engine) -> None:
-    # Resources plus their check history. No alert/incident tables exist yet.
+    # Resources, their check history, and alerting (rules, incidents, incident events).
     tables = set(inspect(pg_engine).get_table_names()) - {"alembic_version"}
-    assert tables == {"monitored_resources", "resource_check_results"}
+    assert tables == {
+        "monitored_resources",
+        "resource_check_results",
+        "alert_rules",
+        "incidents",
+        "incident_events",
+    }
 
 
 # --- Schema constraints -----------------------------------------------------------------
@@ -280,3 +286,32 @@ def test_history_migration_preserves_existing_resources_and_is_reversible(
     assert count_checks(session_factory, rid) == 0  # a fresh, empty history table
     insert_check(session_factory, rid, datetime(2026, 3, 10, tzinfo=UTC), response_time_ms=1.0)
     assert count_checks(session_factory, rid) == 1
+
+
+def test_alerting_migration_preserves_resources_and_history(
+    pg_engine: Engine, session_factory: sessionmaker[Session]
+) -> None:
+    rid = insert_resource(session_factory, name="keeper", status=ResourceStatus.DEGRADED)
+    insert_check(
+        session_factory,
+        rid,
+        datetime(2026, 3, 10, 12, tzinfo=UTC),
+        status=ResourceStatus.DEGRADED,
+        http_status_code=503,
+        response_time_ms=42.5,
+    )
+    try:
+        run_alembic(pg_engine, "downgrade", "0003")  # drops only the three alerting tables
+        tables = set(inspect(pg_engine).get_table_names())
+        assert not {"alert_rules", "incidents", "incident_events"} & tables
+        assert {"monitored_resources", "resource_check_results"} <= tables
+        run_alembic(pg_engine, "upgrade", "head")
+    finally:
+        run_alembic(pg_engine, "upgrade", "head")
+
+    assert fetch(session_factory, rid).name == "keeper"
+    (row,) = history(session_factory, rid)
+    assert (row.http_status_code, str(row.response_time_ms)) == (503, "42.50")
+    with pg_engine.connect() as connection:
+        for table in ("alert_rules", "incidents", "incident_events"):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar_one() == 0

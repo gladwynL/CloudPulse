@@ -248,7 +248,12 @@ def run_alembic(engine: Engine, command_name: str, revision: str) -> None:
 @pytest.fixture
 def session_factory(pg_engine: Engine) -> sessionmaker[Session]:
     with pg_engine.begin() as connection:
-        connection.execute(text("TRUNCATE resource_check_results, monitored_resources"))
+        connection.execute(
+            text(
+                "TRUNCATE incident_events, incidents, alert_rules, "
+                "resource_check_results, monitored_resources"
+            )
+        )
     return sessionmaker(pg_engine, autoflush=False, expire_on_commit=False)
 
 

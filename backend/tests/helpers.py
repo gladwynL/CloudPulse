@@ -7,9 +7,19 @@ from decimal import Decimal
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.models.alert import AlertRule, Incident, IncidentEvent
 from app.models.check_result import ResourceCheckResult
-from app.models.enums import CheckSource, ErrorCategory
+from app.models.enums import (
+    AlertOperator,
+    AlertRuleType,
+    AlertSeverity,
+    CheckSource,
+    ErrorCategory,
+    StatusCondition,
+)
 from app.models.resource import MonitoredResource, ResourceStatus
+from app.monitoring.types import CheckResult, ClaimedCheck
+from app.repositories import resources as _resource_repo
 
 
 def insert_resource(
@@ -140,3 +150,127 @@ def make_due(factory: sessionmaker[Session], resource_id: uuid.UUID) -> None:
             {"i": resource_id},
         )
         session.commit()
+
+
+# --- alerting helpers ---------------------------------------------------------------------
+
+
+def make_rule(
+    factory: sessionmaker[Session],
+    resource_id: uuid.UUID,
+    rule_type: AlertRuleType = AlertRuleType.CONSECUTIVE_FAILURES,
+    *,
+    name: str = "rule",
+    consecutive_failures: int | None = None,
+    operator: AlertOperator | None = None,
+    threshold: float | None = None,
+    status_condition: StatusCondition | None = None,
+    recovery_successes: int = 1,
+    severity: AlertSeverity = AlertSeverity.WARNING,
+    enabled: bool = True,
+) -> uuid.UUID:
+    """Insert a rule directly. Sensible defaults per type: 3 failures / DOWN condition."""
+    if rule_type is AlertRuleType.CONSECUTIVE_FAILURES and consecutive_failures is None:
+        consecutive_failures = 3
+    if rule_type is AlertRuleType.LATENCY_THRESHOLD:
+        consecutive_failures = consecutive_failures or 3
+        operator = operator or AlertOperator.GREATER_THAN
+        threshold = 1000.0 if threshold is None else threshold
+    if rule_type is AlertRuleType.STATUS and status_condition is None:
+        status_condition = StatusCondition.DOWN
+    rule = AlertRule(
+        resource_id=resource_id,
+        name=name,
+        rule_type=rule_type,
+        consecutive_failures=consecutive_failures,
+        operator=operator,
+        threshold=None if threshold is None else Decimal(str(threshold)),
+        status_condition=status_condition,
+        recovery_successes=recovery_successes,
+        severity=severity,
+        is_enabled=enabled,
+    )
+    with factory() as session:
+        session.add(rule)
+        session.commit()
+        return rule.id
+
+
+def fetch_rule(factory: sessionmaker[Session], rule_id: uuid.UUID) -> AlertRule:
+    with factory() as session:
+        row = session.get(AlertRule, rule_id)
+        assert row is not None
+        session.expunge(row)
+        return row
+
+
+def incidents(
+    factory: sessionmaker[Session], *, rule_id: uuid.UUID | None = None
+) -> list[Incident]:
+    stmt = select(Incident).order_by(Incident.triggered_at, Incident.id)
+    if rule_id is not None:
+        stmt = stmt.where(Incident.alert_rule_id == rule_id)
+    with factory() as session:
+        rows = list(session.execute(stmt).scalars())
+        for row in rows:
+            session.expunge(row)
+        return rows
+
+
+def events(factory: sessionmaker[Session], incident_id: uuid.UUID) -> list[IncidentEvent]:
+    stmt = (
+        select(IncidentEvent)
+        .where(IncidentEvent.incident_id == incident_id)
+        .order_by(IncidentEvent.occurred_at, IncidentEvent.id)
+    )
+    with factory() as session:
+        rows = list(session.execute(stmt).scalars())
+        for row in rows:
+            session.expunge(row)
+        return rows
+
+
+def make_result(
+    status: ResourceStatus, response_time_ms: float | None = None, duration_ms: float = 20.0
+) -> CheckResult:
+    if status is ResourceStatus.DOWN:
+        return CheckResult(
+            status, None, None, "timeout: no response within 5s", ErrorCategory.TIMEOUT, duration_ms
+        )
+    http = 200 if status is ResourceStatus.HEALTHY else 503
+    rt = 50.0 if response_time_ms is None else response_time_ms
+    error = None if status is ResourceStatus.HEALTHY else f"expected status 200, got {http}"
+    category = None if status is ResourceStatus.HEALTHY else ErrorCategory.UNEXPECTED_STATUS
+    return CheckResult(status, http, rt, error, category, duration_ms)
+
+
+def claim_resource(factory: sessionmaker[Session], resource_id: uuid.UUID) -> ClaimedCheck:
+    with factory() as session:
+        claim = _resource_repo.claim_by_id(session, resource_id, owner="t", grace_seconds=30)
+        session.commit()
+    assert isinstance(claim, ClaimedCheck), claim
+    return claim
+
+
+def feed(
+    factory: sessionmaker[Session],
+    resource_id: uuid.UUID,
+    status: ResourceStatus,
+    response_time_ms: float | None = None,
+    source: CheckSource = CheckSource.SCHEDULED,
+) -> bool:
+    """Run one full accepted check (claim -> complete) and return whether it was accepted."""
+    claim = claim_resource(factory, resource_id)
+    with factory() as session:
+        accepted = _resource_repo.complete(
+            session, claim, make_result(status, response_time_ms), source
+        )
+        session.commit()
+    return accepted
+
+
+def feed_all(
+    factory: sessionmaker[Session], resource_id: uuid.UUID, statuses: list[ResourceStatus]
+) -> None:
+    for status in statuses:
+        feed(factory, resource_id, status)

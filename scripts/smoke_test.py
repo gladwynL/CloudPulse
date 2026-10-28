@@ -10,7 +10,10 @@ Requires the stack to be up with the demo target reachable by the worker:
 It registers resources against the demo nginx and verifies, end to end: scheduled checks
 run and are recorded as history, manual checks enter history too, summary and time-series
 metrics agree with the recorded rows, history survives a worker restart, disabling stops new
-measurements (but keeps history), and unsafe URLs are rejected. It deletes what it creates.
+measurements (but keeps history), and unsafe URLs are rejected. With --docker-control it also
+runs the alerting scenario: a consecutive-failure rule fires exactly one incident when the demo
+target is stopped, the incident is acknowledged, survives a worker restart, and resolves itself
+when the target returns. It deletes what it creates.
 """
 
 import argparse
@@ -84,6 +87,15 @@ def expect(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
     print(f"  ok  {message}")
+
+
+def compose(*args: str) -> None:
+    subprocess.run(
+        ["docker", "compose", "--profile", "demo", *args],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+    )
 
 
 def restart_worker() -> None:
@@ -276,21 +288,237 @@ def run(api: Api, created: list[str], do_restart: bool) -> None:
     created.remove(rid)
     expect(api.call("GET", f"/api/v1/resources/{rid}/checks")[0] == 404, "its history is gone (404)")
 
+    if do_restart:
+        alert_scenario(api, created)
+    else:
+        print("alerting scenario skipped (needs --docker-control to stop/start the demo target)")
+
+
+# --- Alerting scenario ----------------------------------------------------------------------
+
+RULE_FAILURES = 3
+RULE_RECOVERY = 2
+
+
+def resource_incidents(api: Api, resource_id: str) -> list[dict]:
+    status, body = api.call("GET", f"/api/v1/incidents?resource_id={resource_id}&limit=200")
+    assert status == 200, body
+    return body["items"]
+
+
+def get_rule(api: Api, rule_id: str) -> dict:
+    status, body = api.call("GET", f"/api/v1/alert-rules/{rule_id}")
+    assert status == 200, body
+    return body
+
+
+def alert_scenario(api: Api, created: list[str]) -> None:
+    print("alerting: rule, incident lifecycle, restart, recovery")
+    target_stopped = False
+    try:
+        status, resource = api.call(
+            "POST",
+            "/api/v1/resources",
+            {"name": "smoke-alerting", "url": f"{TARGET}/", "check_interval_seconds": INTERVAL},
+        )
+        expect(status == 201, "alerting resource registered")
+        rid = resource["id"]
+        created.append(rid)
+
+        status, rule = api.call(
+            "POST",
+            f"/api/v1/resources/{rid}/alert-rules",
+            {
+                "name": "3 consecutive failures",
+                "rule_type": "CONSECUTIVE_FAILURES",
+                "consecutive_failures": RULE_FAILURES,
+                "recovery_successes": RULE_RECOVERY,
+                "severity": "CRITICAL",
+            },
+        )
+        expect(status == 201, "consecutive-failure rule created")
+        rule_id = rule["id"]
+        expect(
+            (rule["current_state"], rule["failure_streak"]) == ("INSUFFICIENT_DATA", 0),
+            "a new rule starts as INSUFFICIENT_DATA with zero counters",
+        )
+
+        wait_for(
+            "rule evaluates healthy checks",
+            lambda: get_rule(api, rule_id)["current_state"] == "OK",
+            timeout=INTERVAL * 6 + 20,
+        )
+        first_eval = get_rule(api, rule_id)["last_evaluated_at"]
+        wait_for(
+            "a second evaluation",
+            lambda: get_rule(api, rule_id)["last_evaluated_at"] != first_eval,
+            timeout=INTERVAL * 6 + 20,
+        )
+        expect(resource_incidents(api, rid) == [], "healthy checks open no incident")
+        expect(get_rule(api, rule_id)["failure_streak"] == 0, "healthy checks keep the streak at 0")
+
+        print("  ... stopping the demo target")
+        compose("stop", "demo-target")
+        target_stopped = True
+
+        seen = wait_for(
+            "failed checks advance the rule counter",
+            lambda: (lambda r: r if r["failure_streak"] >= 1 else None)(get_rule(api, rule_id)),
+            timeout=INTERVAL * 6 + 20,
+        )
+        expect(seen["failure_streak"] >= 1, "a failed check advanced the failure counter")
+        if seen["failure_streak"] < RULE_FAILURES:
+            expect(
+                seen["current_state"] == "OK" and resource_incidents(api, rid) == [],
+                f"below {RULE_FAILURES} failures the rule is not firing and no incident exists",
+            )
+
+        firing = wait_for(
+            "rule reaches FIRING",
+            lambda: (lambda r: r if r["current_state"] == "FIRING" else None)(
+                get_rule(api, rule_id)
+            ),
+            timeout=INTERVAL * 8 + 30,
+        )
+        expect(firing["failure_streak"] >= RULE_FAILURES, "rule fired at the required threshold")
+        (incident,) = resource_incidents(api, rid)
+        expect(
+            incident["status"] == "OPEN" and incident["severity"] == "CRITICAL",
+            "exactly one OPEN CRITICAL incident was opened",
+        )
+        expect(incident["alert_rule_id"] == rule_id, "the incident belongs to the rule")
+
+        streak_at_open = firing["failure_streak"]
+        wait_for(
+            "further unhealthy checks",
+            lambda: get_rule(api, rule_id)["failure_streak"] >= streak_at_open + 2,
+            timeout=INTERVAL * 8 + 30,
+        )
+        expect(len(resource_incidents(api, rid)) == 1, "more unhealthy checks open no duplicate")
+        expect(
+            get_rule(api, rule_id)["current_state"] == "FIRING", "the rule stays FIRING meanwhile"
+        )
+
+        status, acked = api.call("POST", f"/api/v1/incidents/{incident['id']}/acknowledge")
+        expect(status == 200 and acked["status"] == "ACKNOWLEDGED", "incident acknowledged")
+        status, again = api.call("POST", f"/api/v1/incidents/{incident['id']}/acknowledge")
+        expect(
+            status == 200 and again["acknowledged_at"] == acked["acknowledged_at"],
+            "acknowledging again is a harmless no-op",
+        )
+        expect(get_rule(api, rule_id)["current_state"] == "FIRING", "acknowledging did not resolve")
+
+        print("  ... restarting the worker while the incident is active")
+        before_restart = get_rule(api, rule_id)["failure_streak"]
+        restart_worker()
+        after = get_rule(api, rule_id)
+        expect(
+            after["current_state"] == "FIRING" and after["failure_streak"] >= before_restart,
+            "rule progress persisted across the worker restart",
+        )
+        expect(
+            [i["status"] for i in resource_incidents(api, rid)] == ["ACKNOWLEDGED"],
+            "the acknowledged incident persisted across the restart",
+        )
+        wait_for(
+            "checks resume after the restart",
+            lambda: get_rule(api, rule_id)["failure_streak"] > before_restart,
+            timeout=INTERVAL * 8 + 30,
+        )
+        expect(len(resource_incidents(api, rid)) == 1, "still exactly one incident after restart")
+
+        print("  ... restoring the demo target")
+        compose("start", "demo-target")
+        target_stopped = False
+
+        def resolved():
+            (current,) = resource_incidents(api, rid)
+            return current if current["status"] == "RESOLVED" else None
+
+        done = wait_for("recovery resolves the incident", resolved, timeout=INTERVAL * 12 + 60)
+        expect(done["resolution_reason"] == "RECOVERED", "resolved automatically as RECOVERED")
+        expect(
+            done["acknowledged_at"] is not None,
+            "the acknowledgement is kept on the resolved incident",
+        )
+        final_rule = get_rule(api, rule_id)
+        expect(
+            (final_rule["current_state"], final_rule["failure_streak"], final_rule["recovery_streak"])
+            == ("OK", 0, 0),
+            "the rule returned to OK with counters reset",
+        )
+
+        status, timeline = api.call("GET", f"/api/v1/incidents/{done['id']}/events")
+        expect(status == 200, "incident timeline available")
+        kinds = [(e["event_type"], e["actor"]) for e in timeline["items"]]
+        expect(
+            kinds == [("OPENED", "SYSTEM"), ("ACKNOWLEDGED", "MANUAL"), ("RECOVERED", "SYSTEM")],
+            "timeline is OPENED -> ACKNOWLEDGED -> RECOVERED",
+        )
+        times = [e["occurred_at"] for e in timeline["items"]]
+        expect(times == sorted(times), "timeline timestamps are in order")
+
+        history_rows = api.history(rid, limit=200)["items"]
+        by_id = {row["id"]: row for row in history_rows}
+        opener = by_id.get(done["opened_by_check_id"])
+        expect(
+            opener is not None
+            and opener["status"] == "DOWN"
+            and opener["checked_at"] == done["triggered_at"],
+            "the incident points at the exact DOWN measurement that opened it",
+        )
+        expect(
+            sum(1 for r in history_rows if r["status"] == "DOWN") >= RULE_FAILURES
+            and history_rows[0]["status"] == "HEALTHY",
+            "history shows the outage and the recovery",
+        )
+
+        def stable_snapshot():
+            before = api.status_of(rid)["last_checked_at"]
+            newest = api.history(rid, limit=1)["items"][0]["checked_at"]
+            return (before, newest) if before == api.status_of(rid)["last_checked_at"] else None
+
+        last, newest = wait_for("a stable snapshot", stable_snapshot, timeout=30)
+        expect(last == newest, "latest state and newest history row agree")
+        expect(api.status_of(rid)["current_status"] == "HEALTHY", "the resource is HEALTHY again")
+
+        print("  ... deleting the resource: incident history must remain")
+        status, _ = api.call("DELETE", f"/api/v1/resources/{rid}")
+        expect(status == 204, "resource deleted")
+        created.remove(rid)
+        status, kept = api.call("GET", f"/api/v1/incidents/{done['id']}")
+        expect(
+            status == 200
+            and kept["resource_id"] is None
+            and kept["resource_name"] == "smoke-alerting"
+            and kept["resolution_reason"] == "RECOVERED",
+            "the incident survives resource deletion with its name snapshot",
+        )
+        expect(
+            api.call("GET", f"/api/v1/alert-rules/{rule_id}")[0] == 404,
+            "the rule was removed with its resource",
+        )
+    finally:
+        if target_stopped:
+            compose("start", "demo-target")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="CloudPulse end-to-end smoke test")
     parser.add_argument("--api", default="http://localhost:8000", help="API base URL")
     parser.add_argument(
-        "--restart-worker",
+        "--docker-control",
+        "--restart-worker",  # earlier name, kept as an alias
+        dest="docker_control",
         action="store_true",
-        help="restart the worker container mid-test (needs the docker CLI)",
+        help="let the test restart the worker and stop/start the demo target (needs docker)",
     )
     args = parser.parse_args()
 
     api = Api(args.api)
     created: list[str] = []
     try:
-        run(api, created, args.restart_worker)
+        run(api, created, args.docker_control)
     except (AssertionError, subprocess.CalledProcessError) as error:
         print(f"\nSMOKE TEST FAILED: {error}", file=sys.stderr)
         return 1

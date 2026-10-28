@@ -1,9 +1,9 @@
 # CloudPulse Architecture
 
-This document describes the architecture as implemented today (Phase 2) and the direction it
+This document describes the architecture as implemented today (Phase 3) and the direction it
 is designed to grow in. Anything under "Planned" does not exist yet.
 
-## Current (Phase 2)
+## Current (Phase 3)
 
 ```
  Browser / curl / Swagger
@@ -34,6 +34,7 @@ is designed to grow in. Anything under "Planned" does not exist yet.
 | `schemas` | Pydantic request/response models for resources and metrics (no lease internals exposed) |
 | `services` | Resource rules (validation, update semantics), readiness check |
 | `repositories` | All SQL: CRUD plus the lease/claim/complete/release protocol |
+| `alerting` | `evaluator` (pure rule state machine), `engine` (evaluation inside the completion transaction), `lifecycle` (incident/event writes), `management` (explicit closure when config changes) |
 | `monitoring` | `security` (URL + address policy), `network` (guarded connections), `checker`, `executor`, `scheduler`, `store`, `types` |
 | `models`, `db` | `MonitoredResource`, `ResourceStatus`; engine/session, declarative base |
 | `core` | Settings, JSON logging, request-ID/logging middleware |
@@ -66,6 +67,27 @@ transaction timestamp: identical to the resource's `last_checked_at` for that ch
 physical insert time; `response_time_ms` is HTTP latency to response headers (null if none);
 `duration_ms` is the execution time of the whole check. Numbers are `NUMERIC(10,2)`, rounded once in
 Python. Only sanitized text is stored.
+
+**`alert_rules`** (Phase 3): configuration plus persisted evaluation progress. `rule_type` is
+`CONSECUTIVE_FAILURES`, `LATENCY_THRESHOLD` or `STATUS`; a database constraint requires exactly the
+fields each type needs (and nothing else). Progress columns: `current_state`
+(`INSUFFICIENT_DATA`/`OK`/`FIRING`), `failure_streak`, `recovery_streak`, `last_evaluated_check_id`,
+`last_evaluated_at`, `last_triggered_at`. Invariants enforced by constraints: a disabled rule is reset
+(never firing, counters 0) and a firing rule has a trigger time. Indexes: a partial index on enabled
+rules by resource (the lookup done on every accepted check) and `(resource_id, created_at, id)` for
+listing. Deleting a resource cascades to its rules.
+
+**`incidents`** (Phase 3): one durable row per detected problem. `status` `OPEN`/`ACKNOWLEDGED`/
+`RESOLVED` is tied to its timestamps and `resolution_reason` by a check constraint. It carries snapshots
+(`resource_name`, `rule_name`, `rule_type`, never the URL) and **nullable** foreign keys to the
+resource and rule (`ON DELETE SET NULL`), so history survives deletion; `opened_by_check_id` links to the
+accepted measurement that opened it. A **partial unique index** on `alert_rule_id WHERE status IN
+('OPEN','ACKNOWLEDGED')` allows at most one active incident per rule. Indexes for newest-first listing
+(global and per resource) and a small partial index for active incidents.
+
+**`incident_events`** (Phase 3): append-only timeline (`OPENED`, `ACKNOWLEDGED`, and one event per
+resolution reason), with `actor` (`SYSTEM`/`MANUAL`, no authenticated identity) and small JSON
+`details`. Cascades only with its incident.
 
 ### Health states
 
@@ -118,6 +140,42 @@ place a result becomes authoritative. The lease-guarded state `UPDATE` is the ga
 There is no second history-writing path. These properties have real-PostgreSQL tests, including
 concurrent completion and competing schedulers.
 
+### Alert evaluation
+
+Three concepts: a **rule** (configured condition), its **state** (firing now?), and an **incident**
+(durable record). Evaluation is a pure function (`alerting/evaluator.py`): each accepted observation is
+classified for the rule as MATCH, RECOVER or NEUTRAL, which advances two persisted counters and the
+state machine (`INSUFFICIENT_DATA → OK → FIRING → OK`). Missing latency is neutral for latency rules (it
+resets a streak and cannot resolve an incident); STATUS rules fire on one matching result and recover on
+`recovery_successes` consecutive HEALTHY checks. Because the counters are columns, a restart loses
+nothing, and no scan of history is needed: evaluation touches only the resource's enabled rules.
+
+It runs **inside `repo.complete()`'s transaction**, after the lease-gated state update and the history
+insert (so only for accepted results), and persists rule progress, incident changes and events before the
+commit. Failure anywhere rolls the *measurement* back too; the unreleased lease expires and the existing
+retry path re-checks. The HTTP request is still outside any transaction.
+
+Concurrency design:
+
+- **Serialization point:** the resource row lock. The completion's `UPDATE` takes it; rule create/edit/
+  delete and resource disable/delete take it first. Order: **resource → rules (by id) → incidents (by id)**,
+  so there is no lock cycle. Acknowledgement locks only its incident row.
+- **Backstop:** the partial unique index. Even bypassing the application locks, two writers cannot both
+  open an incident for a rule (tested).
+- **Acknowledge vs recovery:** serialized on the incident row; whichever commits first wins and the other
+  sees the new state (ack → `409` if already resolved; recovery still resolves an acknowledged incident).
+  Recovery stamps `clock_timestamp()` rather than the transaction-start `now()`, because it may have waited
+  on the incident lock: otherwise `RECOVERED` could be recorded as earlier than the acknowledgement it
+  followed (found by a race test).
+- **Bounded cost:** one indexed rule query, one incident query only when a rule is firing, a single `now()`
+  read, one batched `UPDATE` for all evaluated rules and (if needed) one for incident `last_observed_at`,
+  so cost does not grow in statements with the number of rules (capped at 20 per resource).
+
+Explicit terminal dispositions: disabling or deleting a rule, editing a trigger/recovery setting, and
+disabling or deleting a resource each close the active incident with a distinct `resolution_reason` and a
+matching timeline event, in the same transaction as the change. Incidents are kept when rules or resources
+are deleted (snapshots + nullable FKs); they are not subject to retention.
+
 ### Reading history
 
 Everything is computed in PostgreSQL over half-open `[start, end)` windows on `checked_at`:
@@ -168,7 +226,7 @@ because it prints full URLs. Idle scheduler ticks log nothing; claims and comple
 
 ### Known limitations
 
-No authentication (do not expose the API); one worker; history retained for a bounded period only
+No authentication (do not expose the API; incident `MANUAL` actors are not verified identities); no notifications (incidents are records read through the API); incidents are never pruned; a target that flaps faster than the configured streaks can open repeatedly; one worker; history retained for a bounded period only
 (no downsampling, so no long-term trends); availability is check-based, not continuous uptime; plain
 PostgreSQL tables without partitioning (adequate for portfolio scale, to be revisited if volume grows);
 `GET`-only checks with timing to response headers; the httpx transport hook above is an implementation
@@ -176,11 +234,11 @@ dependency.
 
 ## Planned (later phases)
 
-- **Phase 3 — alerting and incidents.** Rules evaluated over accepted measurements (the history
-  index supports "last N checks" and "failures in the last X minutes"); incident open/resolve
-  lifecycle, ideally written in the same transaction as the measurement that triggers it. Notification
-  delivery will need its own failure handling.
-- **Phase 4 — dashboard.** Resource management and status views in the React app.
+- **Notifications** (not scheduled): delivery of incident events by email/chat/webhook. It should consume
+  `incident_events` outside the check transaction with its own retries, so a slow provider can never delay
+  or fail a check.
+- **Phase 4 — dashboard.** Resource management, status, history, rules and incidents in the React app; every
+  needed read already has an API.
 - **Phase 5 — deployment.** Azure hosting and, if justified, infrastructure-as-code (see
   [`infra/`](../infra/README.md)); an authentication/authorization layer belongs before any
   public exposure.

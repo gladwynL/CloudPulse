@@ -3,6 +3,7 @@
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from app.services.alerts import AlertRuleNotFoundError, IncidentNotFoundError, StateConflictError
 from app.services.resources import ResourceNotFoundError, ResourceValidationError
 
 
@@ -18,6 +19,18 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ResourceNotFoundError)
     async def not_found(_: Request, __: ResourceNotFoundError) -> JSONResponse:
         return JSONResponse({"detail": "Resource not found"}, status.HTTP_404_NOT_FOUND)
+
+    @app.exception_handler(AlertRuleNotFoundError)
+    async def rule_not_found(_: Request, __: AlertRuleNotFoundError) -> JSONResponse:
+        return JSONResponse({"detail": "Alert rule not found"}, status.HTTP_404_NOT_FOUND)
+
+    @app.exception_handler(IncidentNotFoundError)
+    async def incident_not_found(_: Request, __: IncidentNotFoundError) -> JSONResponse:
+        return JSONResponse({"detail": "Incident not found"}, status.HTTP_404_NOT_FOUND)
+
+    @app.exception_handler(StateConflictError)
+    async def state_conflict(_: Request, exc: StateConflictError) -> JSONResponse:
+        return JSONResponse({"detail": exc.message}, status.HTTP_409_CONFLICT)
 
     @app.exception_handler(CheckConflictError)
     async def conflict(_: Request, exc: CheckConflictError) -> JSONResponse:

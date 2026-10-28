@@ -27,6 +27,10 @@ select = [
     "RUF", # ruff-specific rules
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Migrations embed long generated SQL strings (constraint expressions).
+"alembic/versions/*" = ["E501"]
+
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's dependency-injection markers are intentionally used as defaults.
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path"]

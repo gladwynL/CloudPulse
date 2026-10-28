@@ -10,12 +10,16 @@ const PHASES = [
     title: 'Metrics & history',
     summary: 'Stored check history, availability and latency APIs, time series, retention.',
   },
-  { id: 3, title: 'Alerts & incidents', summary: 'Threshold rules and the incident lifecycle.' },
+  {
+    id: 3,
+    title: 'Alerts & incidents',
+    summary: 'Alert rules, deterministic evaluation, incident lifecycle and timeline.',
+  },
   { id: 4, title: 'Monitoring dashboard', summary: 'Resource management and status views.' },
   { id: 5, title: 'Cloud deployment', summary: 'Azure deployment and infrastructure-as-code.' },
 ] as const;
 
-const CURRENT_PHASE = 2;
+const CURRENT_PHASE = 3;
 
 export function Roadmap() {
   return (

@@ -6,16 +6,17 @@
 production-style engineering project: health checks, uptime and latency tracking,
 alerting, and incident management for cloud services, with a React dashboard on top.
 
-> **Current status: Phase 2 — Metrics ingestion and historical storage.**
+> **Current status: Phase 3 — Alerting and incident management.**
 > You can register HTTP services, have a worker check them on a schedule, trigger manual
-> checks, and read each resource's latest health. **Every accepted check is also stored as a
-> durable history row**, queryable through REST APIs for check history, availability/latency
-> summaries, and time-bucketed series (the data a future dashboard will chart). Old history is
-> pruned by a retention policy.
+> checks, and read each resource's latest health. Every accepted check is stored as a durable
+> history row with availability/latency/time-series APIs and retention. **On top of that you can
+> define alert rules; each accepted check is evaluated against them in the same transaction, and
+> a firing rule opens exactly one incident that is acknowledged by hand and resolved
+> automatically on recovery**, with a durable event timeline.
 >
-> **Not implemented yet:** alert rules, incidents, notifications, authentication, the
-> monitoring dashboard (charts and resource management UI), and cloud deployment.
-> See the [roadmap](#roadmap).
+> **Not implemented yet:** notifications of any kind (email, chat, webhooks, paging),
+> authentication, the monitoring dashboard (charts and management UI), and cloud deployment.
+> Incidents are visible only through the REST API / Swagger UI. See the [roadmap](#roadmap).
 
 ---
 
@@ -30,6 +31,7 @@ alerting, and incident management for cloud services, with a React dashboard on 
 - [Quick start (Docker Compose)](#quick-start-docker-compose)
 - [Monitoring guide](#monitoring-guide)
 - [History and metrics](#history-and-metrics)
+- [Alerts and incidents](#alerts-and-incidents)
 - [Scheduling and worker design](#scheduling-and-worker-design)
 - [Network safety (SSRF)](#network-safety-ssrf)
 - [Security and deployment limitations](#security-and-deployment-limitations)
@@ -70,7 +72,10 @@ Azure-oriented deployment.
 | Manual on-demand checks | ✅ Phase 1 |
 | SSRF protections for user-supplied URLs | ✅ Phase 1 |
 | Structured JSON logging, health/readiness probes, Docker, CI | ✅ Phase 0 |
-| Alert rules, incidents | Planned (Phase 3) |
+| Alert rules: consecutive failures, latency threshold, immediate status | ✅ Phase 3 |
+| Deterministic evaluation with persisted counters, anti-noise streaks | ✅ Phase 3 |
+| Incident lifecycle (open, acknowledge, auto-resolve) with event timeline | ✅ Phase 3 |
+| Notifications (email, chat, webhooks, paging), escalation | Not planned yet |
 | Full React monitoring dashboard | Planned (Phase 4) |
 | Azure deployment, infrastructure-as-code | Planned (Phase 5) |
 
@@ -129,7 +134,8 @@ CloudPulse/
 │   │   ├── api/            # routers (health, resources), dependencies, error mapping
 │   │   ├── core/           # settings, structured logging, request middleware
 │   │   ├── db/             # engine/session management, declarative Base
-│   │   ├── models/         # MonitoredResource, ResourceCheckResult, enums
+│   │   ├── alerting/       # evaluator (pure state machine), engine, incident lifecycle
+│   │   ├── models/         # resource, check result, alert rule, incident, event, enums
 │   │   ├── monitoring/     # checker, SSRF policy + guarded network backend,
 │   │   │                   #   executor, scheduler, lease store, retention
 │   │   ├── repositories/   # SQL: CRUD, lease/claim/complete, history queries, retention
@@ -137,7 +143,7 @@ CloudPulse/
 │   │   ├── services/       # resource rules, readiness check
 │   │   ├── main.py         # create_app() factory
 │   │   └── worker.py       # `python -m app.worker`
-│   ├── alembic/            # migrations (0001 baseline, 0002 resources, 0003 check history)
+│   ├── alembic/            # migrations (0001 baseline … 0004 alerting)
 │   ├── tests/              # unit tests + PostgreSQL integration tests
 │   ├── pyproject.toml, requirements*.txt, Dockerfile
 ├── frontend/               # React shell (App, components, status hook, tests)
@@ -210,7 +216,7 @@ Then follow the [monitoring guide](#monitoring-guide) using `http://demo-target:
 ```bash
 MONITORING_MIN_INTERVAL_SECONDS=5 MONITORING_ALLOWED_LOCAL_HOSTS=demo-target:8080 \
   docker compose --profile demo up --build --wait
-python scripts/smoke_test.py --restart-worker
+python scripts/smoke_test.py --docker-control
 ```
 
 ## Monitoring guide
@@ -473,6 +479,227 @@ On one development laptop (PostgreSQL in Docker) the API responded in roughly 30
 30-day summary over 8,640 rows (about 33 ms) with under 1.5 MiB of Python allocation per request.
 These are small local numbers, **not production benchmarks**.
 
+## Alerts and incidents
+
+Three different things, deliberately kept apart:
+
+| Concept | What it is | Where it lives |
+| --- | --- | --- |
+| **Alert rule** | A configured condition on one resource ("3 consecutive failures") | `alert_rules` (configuration) |
+| **Alert state** | Whether that condition is firing *right now*: `INSUFFICIENT_DATA`, `OK`, `FIRING`, plus two persisted counters | `alert_rules` (progress columns) |
+| **Incident** | A durable record of one detected problem and its lifecycle: `OPEN` → `ACKNOWLEDGED` → `RESOLVED` | `incidents` + `incident_events` |
+
+```
+Health check ─► accepted result ─► history row ─► rule evaluation ─► state transition ─► incident / event
+              (lease-gated)       (Phase 2)        (every enabled rule)                  (one transaction)
+```
+
+### Rule types
+
+| `rule_type` | Required fields | Triggers when | Recovers when |
+| --- | --- | --- | --- |
+| `CONSECUTIVE_FAILURES` | `consecutive_failures` (1–20) | that many checks in a row are `DEGRADED` or `DOWN` | `recovery_successes` consecutive `HEALTHY` checks |
+| `STATUS` | `status_condition`: `DOWN`, `DEGRADED` or `UNHEALTHY` (= either) | a **single** matching result (immediate) | `recovery_successes` consecutive `HEALTHY` checks |
+| `LATENCY_THRESHOLD` | `operator` (`GREATER_THAN`, `GREATER_THAN_OR_EQUAL`), `threshold` (ms, ≤ 2 decimals), `consecutive_failures` (1–20) | that many consecutive checks with a response time on the wrong side of the threshold | `recovery_successes` consecutive checks with a valid response time that is *not* over the threshold |
+
+Common fields: `name`, `description`, `severity` (`WARNING` default, `CRITICAL`), `is_enabled`
+(default true), `recovery_successes` (1–20, default 1). The type decides which fields apply; fields
+that don't belong to it are **rejected**, not ignored, and the database enforces the same shape.
+At most `ALERTING_MAX_RULES_PER_RESOURCE` (20) rules per resource bound the work done per check.
+
+The three types are distinct on purpose: `STATUS` reacts to one result, `CONSECUTIVE_FAILURES`
+requires repetition (so one transient blip never opens an incident), and `LATENCY_THRESHOLD`
+judges response time, not status.
+
+```bash
+# Open an incident after 3 consecutive unhealthy checks; resolve after 2 healthy ones
+curl -s -X POST localhost:8000/api/v1/resources/<id>/alert-rules -H 'Content-Type: application/json' \
+  -d '{"name": "3 failures", "rule_type": "CONSECUTIVE_FAILURES", "consecutive_failures": 3,
+       "recovery_successes": 2, "severity": "CRITICAL"}'
+
+# Warn when latency is over 1000 ms three checks in a row
+curl -s -X POST localhost:8000/api/v1/resources/<id>/alert-rules -H 'Content-Type: application/json' \
+  -d '{"name": "slow", "rule_type": "LATENCY_THRESHOLD", "operator": "GREATER_THAN",
+       "threshold": 1000, "consecutive_failures": 3}'
+
+# React immediately when the resource goes DOWN
+curl -s -X POST localhost:8000/api/v1/resources/<id>/alert-rules -H 'Content-Type: application/json' \
+  -d '{"name": "down", "rule_type": "STATUS", "status_condition": "DOWN"}'
+```
+
+### Evaluation semantics
+
+Every accepted observation is classified for a rule as **MATCH** (satisfies the trigger),
+**RECOVER** (satisfies the recovery condition), or **NEUTRAL** (neither). Two counters are persisted
+on the rule: `failure_streak` (consecutive MATCHes; any other classification resets it) and
+`recovery_streak` (consecutive RECOVERs while firing; anything else resets it).
+
+| From | Event | To |
+| --- | --- | --- |
+| `INSUFFICIENT_DATA` | first accepted observation that does not trigger | `OK` |
+| `INSUFFICIENT_DATA` / `OK` | `failure_streak` reaches the trigger count (1 for `STATUS`) | `FIRING` (incident opens) |
+| `FIRING` | another MATCH | stays `FIRING` (no new incident; `last_observed_at` advances) |
+| `FIRING` | `recovery_streak` reaches `recovery_successes` | `OK` (incident resolves as `RECOVERED`) |
+
+Details that matter:
+
+- **Missing latency is neutral.** For a latency rule, a check without a response time (a timeout,
+  DNS failure, refused connection) neither counts as a slow response nor as a recovery: it *resets*
+  a building streak, and it cannot resolve a latency incident by itself.
+- A `DEGRADED` result under a `STATUS`/`DOWN` rule is neutral too: it does not trigger, and does not
+  count toward recovery (only `HEALTHY` does).
+- Latency uses the stored two-decimal value, so `1000.00 > 1000` is false and `>=` is true.
+- Evaluation uses **only accepted results**, **only future ones**: a new rule starts at
+  `INSUFFICIENT_DATA` with zero counters and never replays history.
+- Counters live in PostgreSQL, so a worker restart loses nothing; each measurement can advance a
+  rule at most once (the rule remembers the last measurement it evaluated).
+- State changes are logged; unchanged evaluations are not.
+
+### Incident lifecycle
+
+`OPEN → ACKNOWLEDGED → RESOLVED`, or `OPEN → RESOLVED`.
+
+- **One active incident per rule.** A rule that is firing has exactly one `OPEN`/`ACKNOWLEDGED`
+  incident; it enforces this in the application *and* in the database (partial unique index).
+  A rule opens a new incident only after genuinely recovering and firing again.
+- **Acknowledge** (`POST /api/v1/incidents/{id}/acknowledge`): `OPEN → ACKNOWLEDGED`. Repeating it is
+  a harmless no-op (still `200`, same `acknowledged_at`, no second event). A resolved incident returns
+  `409`. Acknowledging means a person looked at it; it does **not** resolve it or change alert state,
+  so automatic recovery still resolves an acknowledged incident. There is no manual resolve.
+- **Resolve** happens automatically with an explicit `resolution_reason`:
+
+| Reason | Cause |
+| --- | --- |
+| `RECOVERED` | the recovery condition was met |
+| `RULE_DISABLED` | the rule was disabled |
+| `RULE_RECONFIGURED` | a setting that changes evaluation was edited |
+| `RULE_DELETED` | the rule was deleted |
+| `RESOURCE_DISABLED` | the resource's monitoring was disabled |
+| `RESOURCE_DELETED` | the resource was deleted |
+
+No incident is ever left silently unresolved.
+
+- **Timeline** (`GET /api/v1/incidents/{id}/events`): an append-only list written in the same
+  transaction as each transition: `OPENED`, `ACKNOWLEDGED`, then `RECOVERED` / `RULE_DISABLED` /
+  `RULE_RECONFIGURED` / `RULE_DELETED` / `RESOURCE_DISABLED` / `RESOURCE_DELETED`, each with a
+  timestamp, an `actor`, and small safe `details` (ids, counts, status; never URLs). `actor` is
+  `SYSTEM` for automatic changes and `MANUAL` for an acknowledgement, which means "an API caller":
+  there is no authentication yet, so it is **not** a verified identity.
+- **Timestamps.** `triggered_at` equals the `checked_at` of the measurement that opened it
+  (`opened_by_check_id` links to it). `resolved_at`/`acknowledged_at` are the real time the change
+  was recorded (so a resolution never precedes an acknowledgement it followed).
+
+### Configuration changes
+
+| Operation | Effect |
+| --- | --- |
+| Create rule | starts `INSUFFICIENT_DATA`, counters 0, evaluates future checks only |
+| Disable rule | closes its active incident (`RULE_DISABLED`), resets it; never evaluated while disabled |
+| Enable rule | starts fresh |
+| Edit `consecutive_failures`, `operator`, `threshold`, `status_condition` or `recovery_successes` | closes an active incident (`RULE_RECONFIGURED`) and resets counters |
+| Edit `name`, `description`, `severity` | not a reconfiguration: progress and the active incident are untouched (the incident keeps the severity it opened with) |
+| Change `rule_type` | not allowed: delete and recreate |
+| Delete rule | closes its active incident (`RULE_DELETED`); the incident is kept |
+| Disable resource | closes the resource's active incidents (`RESOURCE_DISABLED`) and resets its rules |
+| Delete resource | closes active incidents (`RESOURCE_DELETED`); rules are deleted with it, **incidents are kept** |
+| Change a resource's interval, URL, timeout, or expected status | alert state is left alone (fixing a broken URL simply lets the rule recover) |
+
+Each operation is one transaction. Rule edits never rewrite past incidents.
+
+**Incident history outlives its rule and resource.** `incidents.resource_id` and `alert_rule_id`
+become `NULL` when those are deleted (database `ON DELETE SET NULL`); the incident keeps
+`resource_name`, `rule_name` and `rule_type` snapshots (never the target URL), so it stays readable and
+listable. The tradeoff: incidents are not subject to retention, so they accumulate until a future
+phase adds a policy; at a few rows per outage this is small.
+
+### Transactional consistency and concurrency
+
+`repo.complete()` is still the single place a result becomes authoritative. Inside its one
+transaction: validate the lease → update the latest state → insert the history row → **evaluate every
+enabled rule → persist rule progress, incident changes and events** → commit. The HTTP check stays
+outside the transaction.
+
+- **Never evaluated:** stale, expired, duplicate, or deleted-resource results (the lease-gated update
+  matches nothing, so nothing after it runs).
+- **All or nothing.** If evaluation fails (a failed incident or event insert, a constraint violation),
+  the measurement and latest-state update roll back with it. The lease stays held, expires, and the
+  existing retry path re-checks the resource. A measurement is never recorded with its alert
+  evaluation missing.
+- **Lock order: resource row → alert-rule rows (by id) → incident rows (by id).** The resource row lock
+  taken by the completion's `UPDATE` serializes everything about a resource's alert state: other
+  completions (already excluded by the lease), manual checks, rule create/edit/delete, and resource
+  disable/delete, which all take the resource lock first. A fixed order rules out deadlocks.
+  Acknowledging locks only the incident row.
+- **The database is the backstop**: the partial unique index makes a second active incident for a
+  rule impossible even if application locking were bypassed (tested with simultaneous writers).
+- **Acknowledge vs recovery** are serialized on the incident row: either the acknowledgement lands
+  first (the incident ends acknowledged-then-recovered) or recovery lands first (the acknowledgement
+  gets `409`). Both outcomes are tested under real races.
+- **Bounded work per check:** one indexed rule query (partial index on enabled rules), at most one
+  incident query (only when a rule is firing), one batched `UPDATE` for all evaluated rules, and a
+  name lookup only when an incident opens.
+
+### Endpoints
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/resources/{id}/alert-rules` | Create a rule (201) |
+| `GET` | `/api/v1/resources/{id}/alert-rules` | List a resource's rules (`limit` ≤ 100, `offset`), oldest first |
+| `GET` | `/api/v1/alert-rules/{id}` | Rule with its current state and counters |
+| `PATCH` | `/api/v1/alert-rules/{id}` | Update; the merged configuration is re-validated |
+| `DELETE` | `/api/v1/alert-rules/{id}` | Delete (204) |
+| `GET` | `/api/v1/incidents` | List: `status`, `severity`, `resource_id`, `start`/`end` (on `triggered_at`, `[start, end)`), `limit`, `cursor`; newest triggered first |
+| `GET` | `/api/v1/incidents/{id}` | Incident details |
+| `POST` | `/api/v1/incidents/{id}/acknowledge` | Acknowledge |
+| `GET` | `/api/v1/incidents/{id}/events` | Timeline, oldest first |
+
+Errors use the same `{"detail": …}` envelope: `404` unknown rule/incident/resource, `422` invalid input
+(contradictory rule configuration, malformed UUIDs/timestamps, unsupported parameters), `409` for the
+rule cap and for acknowledging a resolved incident. Incident listing uses keyset pagination like the
+history API; a rule's progress (`current_state`, `failure_streak`, `recovery_streak`,
+`last_evaluated_at`, `last_triggered_at`) is part of its response.
+
+```bash
+curl -s "localhost:8000/api/v1/incidents?status=OPEN&severity=CRITICAL"
+curl -s -X POST localhost:8000/api/v1/incidents/<incident-id>/acknowledge
+curl -s localhost:8000/api/v1/incidents/<incident-id>/events
+```
+
+```json
+{
+  "id": "…", "resource_id": "…", "alert_rule_id": "…",
+  "resource_name": "Billing API", "rule_name": "3 failures", "rule_type": "CONSECUTIVE_FAILURES",
+  "title": "CRITICAL: 3 failures on Billing API", "severity": "CRITICAL", "status": "ACKNOWLEDGED",
+  "triggered_at": "2026-03-10T13:06:00Z", "acknowledged_at": "2026-03-10T13:09:12.4Z",
+  "resolved_at": null, "resolution_reason": null, "last_observed_at": "2026-03-10T13:08:00Z",
+  "opened_by_check_id": "…"
+}
+```
+
+### Worker integration
+
+Evaluation runs inside the existing worker (and inside the API process for manual checks) as part of
+`repo.complete()`; there is no separate alerting service, queue, or scheduler. Nothing waits on any
+external delivery because **no notifications exist**: incidents are records you read through the API.
+
+### Noise and flapping
+
+Anti-noise is built from streaks: trigger counts require repetition, recovery counts require sustained
+health, a firing rule never opens duplicates, counters persist across restarts, and state changes
+(not unchanged evaluations) are logged. Known limitations: a target that alternates unhealthy/healthy
+faster than the configured streaks can still open and resolve incidents repeatedly (raise the recovery
+count to damp it); there are no maintenance windows, suppression, escalation, or grouping.
+
+### Performance
+
+Measured with `pytest tests/test_integration_alert_perf.py -s` (laptop, PostgreSQL in Docker, mean of
+15 accepted checks, claim included): about **14 ms** per check with no rules, **17 ms** with 1 rule and
+**20 ms** with 20 rules, with identical statement counts for 1 and 20 rules (2 selects, 3 updates, 1
+insert), so reads do not grow with the rule count. (Before batching the rule updates, 20 rules cost
+about 44 ms because each held the resource lock for its own round trip.) Plans for the rule lookup
+(3,000 rules) and incident listing (5,000 incidents) are asserted to use their indexes with no
+sequential scan. These are small local numbers, not a capacity claim.
+
 ## Scheduling and worker design
 
 **Source of truth is PostgreSQL**, not memory. Each resource row holds `next_check_at` and a
@@ -552,10 +779,13 @@ start** with it set when `ENVIRONMENT` is `staging` or `production`.
 - One worker; no HA or distributed scheduling.
 - History is kept for `METRICS_RETENTION_DAYS` (30) only; there is no downsampling, so long-term
   trends beyond retention are not available. Availability is check-based (not continuous uptime).
-  There are no alerts or incidents yet.
+  Incidents are not subject to retention and accumulate.
 - History grows by `resources × (86400 / interval)` rows per day; size retention and check
   intervals accordingly. PostgreSQL is used as-is (no partitioning or time-series extension).
 - Checks are `GET` only, with response timing measured to headers; bodies are never read.
+- **No notifications.** Alerts produce incidents you read through the API; nothing emails, pages or
+  calls a webhook. Incident management (acknowledge, rule edits) is as unauthenticated as the rest of
+  the API: `MANUAL` in an incident timeline means "an API caller", not a verified person.
 
 ## Environment configuration
 
@@ -585,6 +815,7 @@ by the backend when run from `backend/`, and by Vite.
 | `METRICS_DEFAULT_WINDOW_HOURS` | API | Window when `start`/`end` are omitted (24) |
 | `METRICS_MAX_TIMESERIES_BUCKETS` | API | Maximum buckets per series response (1000) |
 | `METRICS_DEFAULT_PAGE_SIZE`, `METRICS_MAX_PAGE_SIZE` | API | History page size (50 / 200) |
+| `ALERTING_MAX_RULES_PER_RESOURCE` | API | Rules per resource (20); bounds evaluation work per check |
 | `VITE_API_URL` | frontend | API base URL **as seen from the browser** (inlined at build time) |
 | `*_HOST_PORT` | Compose | Host ports published on 127.0.0.1 |
 
@@ -625,7 +856,8 @@ npm run build && npm run preview         # production build preview
 Alembic reads the database URL from application settings (never from `alembic.ini`) and
 targets `app.db.base.Base.metadata`. Revisions: `0001` empty baseline, `0002` the
 `monitored_resources` table (config, latest observation, lease columns, constraints, indexes),
-`0003` the `resource_check_results` history table (additive; existing rows are untouched).
+`0003` the `resource_check_results` history table, `0004` alerting: `alert_rules`, `incidents`,
+`incident_events` (all additive; existing rows are untouched).
 
 ```bash
 cd backend
@@ -652,11 +884,14 @@ pytest                    # unit tests: no database, no internet
 
 The unit tests cover URL/address policy, the guarded network backend, the checker (against a
 throwaway local HTTP server), the scheduler/executor (in-memory store), request validation,
-window/bucket/cursor/rounding logic, and the retention loop.
+window/bucket/cursor/rounding logic, the retention loop, and the alert state machine (exhaustive,
+no database needed).
 
 **PostgreSQL integration tests** (lease/claim correctness, concurrency, history atomicity and
 rollback, history/summary/series correctness against hand-computed data, retention, query plans and
-performance, API behaviour, migrations, schema constraints) run when `TEST_DATABASE_URL` is set, and are skipped otherwise. They
+performance, alert rules, evaluation, incident lifecycle, transaction rollback, real concurrent
+races (acknowledge vs recovery, rule/resource changes vs completion), API behaviour, migrations,
+schema constraints) run when `TEST_DATABASE_URL` is set, and are skipped otherwise. They
 **truncate tables and run migrations up and down**, so the database name must end in `_test` or
 `_ci` — the suite refuses to run against anything else. Never point it at your development database.
 
@@ -672,7 +907,7 @@ The suite applies migrations itself and verifies models and migrations are in sy
 
 ### End-to-end
 
-`python scripts/smoke_test.py --restart-worker` drives a running stack (see the demo-target section
+`python scripts/smoke_test.py --docker-control` drives a running stack (see the demo-target section
 above): scheduled and manual checks reach history, summary and series match the recorded rows,
 history survives a worker restart, disabling stops new measurements, and unsafe URLs stay blocked.
 
@@ -707,7 +942,8 @@ Failure details are logged server-side and never returned. Every response carrie
   PostgreSQL 17 service container; full Pytest including the integration tests.
 - **frontend** — `npm ci`, ESLint, Prettier check, Vitest, production build.
 - **docker** — builds the images, starts the full stack (with the demo target), waits for health,
-  and runs `scripts/smoke_test.py --restart-worker` end to end (history, metrics, worker restart).
+  and runs `scripts/smoke_test.py --docker-control` end to end (history, metrics, worker restart, and the
+  alert-to-incident lifecycle).
 
 Nothing is deployed.
 
@@ -730,16 +966,15 @@ Nothing is deployed.
 | --- | --- | --- |
 | 0 | Foundation: API skeleton, DB/migrations, logging, Docker, CI, dashboard shell | Done |
 | 1 | Resource registry, scheduled HTTP checks, latest health, manual checks, SSRF protection | Done |
-| 2 | Metrics ingestion and history: atomic per-check records, availability/latency APIs, time series, retention | **Current** |
-| 3 | Alerting and incidents: rules, threshold/failure evaluation, incident lifecycle | Planned |
+| 2 | Metrics ingestion and history: atomic per-check records, availability/latency APIs, time series, retention | Done |
+| 3 | Alerting and incidents: rules, deterministic evaluation, incident lifecycle and timeline | **Current** |
 | 4 | Full React monitoring dashboard | Planned |
 | 5 | Cloud deployment: Azure hosting, CD pipeline, infrastructure-as-code if justified | Planned |
 
 Phase boundaries beyond the current phase are provisional and refined as each phase begins.
-### Phase 3 considerations
+### Phase 4 considerations
 
-Alert evaluation can read accepted measurements from `resource_check_results`: rows exist only for
-accepted checks, and the per-resource index supports "last N checks" and "failures in the last X
-minutes" queries. `repo.complete()` returns only after a measurement is committed, so a later
-alert-state or incident write can join the same transaction. Evaluation itself, incidents, and
-notifications are **not implemented**.
+Everything a dashboard needs already has an API: resources and status, history, summaries and
+time-series, rules with live state and counters, and incidents with timelines. Notification delivery
+(email, chat, webhooks) is a separate piece of work that would read `incident_events`; it would need its
+own retry and failure handling and must not run inside the check transaction.

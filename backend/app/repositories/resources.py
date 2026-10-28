@@ -23,6 +23,7 @@ from sqlalchemy import Interval, func, insert, literal_column, or_, select, upda
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
+from app.alerting.engine import evaluate_accepted_result
 from app.models.check_result import ResourceCheckResult
 from app.models.enums import CheckSource
 from app.models.resource import MonitoredResource as M
@@ -151,7 +152,8 @@ def claim_by_id(
 def complete(
     session: Session, claim: ClaimedCheck, result: CheckResult, source: CheckSource
 ) -> bool:
-    """Accept ``result``: update the latest state AND append a history row, atomically.
+    """Accept ``result``: update the latest state, append a history row, and evaluate alert rules,
+    all atomically.
 
     The lease-guarded UPDATE is the gate. It matches only while this executor still holds the
     lease; if it matches nothing (resource deleted, disabled, reconfigured, lease expired or
@@ -161,7 +163,8 @@ def complete(
     Both writes happen in the caller's single transaction (this function never commits): if
     the insert fails, the caller's rollback also undoes the state update and the lease stays
     held until it expires. ``checked_at`` is the transaction timestamp, so it equals the
-    resource's ``last_checked_at`` for this check.
+    resource's ``last_checked_at`` for this check. Alert evaluation (and any incident change) is
+    part of the same transaction and runs only for accepted results.
     """
     stmt = (
         update(M)
@@ -183,8 +186,10 @@ def complete(
     if session.execute(stmt).rowcount != 1:
         return False
 
+    check_id = uuid.uuid4()
     session.execute(
         insert(ResourceCheckResult).values(
+            id=check_id,
             resource_id=claim.resource_id,
             checked_at=func.now(),
             status=result.status,
@@ -195,6 +200,15 @@ def complete(
             error_summary=result.error[:255] if result.error else None,
             source=source,
         )
+    )
+    # Alert evaluation joins this transaction: it sees only accepted results, and if it fails the
+    # measurement and the state update roll back with it (the lease then expires and retries).
+    evaluate_accepted_result(
+        session,
+        resource_id=claim.resource_id,
+        check_id=check_id,
+        status=result.status,
+        response_time_ms=_rounded(result.response_time_ms),
     )
     return True
 
