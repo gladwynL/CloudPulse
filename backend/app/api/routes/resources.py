@@ -70,10 +70,18 @@ def list_resources(
     offset: Annotated[int, Query(ge=0)] = 0,
     is_enabled: bool | None = None,
     current_status: ResourceStatus | None = None,
+    q: Annotated[
+        str | None, Query(max_length=100, description="Name contains (case-insensitive)")
+    ] = None,
 ) -> ResourceListResponse:
     """List resources ordered by creation time (then id), oldest first."""
     page = service.list_resources(
-        session, limit=limit, offset=offset, is_enabled=is_enabled, status=current_status
+        session,
+        limit=limit,
+        offset=offset,
+        is_enabled=is_enabled,
+        status=current_status,
+        name_contains=q.strip() if q and q.strip() else None,
     )
     return ResourceListResponse(
         items=[ResourceResponse.model_validate(r) for r in page.items],

@@ -69,7 +69,7 @@ jobs:
         run: pytest
 
   frontend:
-    name: Frontend (lint, format, test, build)
+    name: Frontend (lint, format, typecheck, test, build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -93,6 +93,9 @@ jobs:
       - name: Prettier check
         run: npm run format:check
 
+      - name: Type check
+        run: npm run typecheck
+
       - name: Vitest
         run: npm test
 
@@ -100,10 +103,10 @@ jobs:
         run: npm run build
 
   docker:
-    name: Docker stack (build, run, smoke test)
+    name: Docker stack (build, run, smoke test, browser E2E)
     runs-on: ubuntu-latest
     needs: [backend, frontend]
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       # Throwaway values for an ephemeral CI stack; nothing here is a real secret.
       POSTGRES_PASSWORD: ci-only-password
@@ -123,6 +126,33 @@ jobs:
 
       - name: End-to-end smoke test
         run: python scripts/smoke_test.py --docker-control
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies and the test browser
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # Drives the real dashboard in a browser against this stack. The tests only create,
+      # change and delete resources they named themselves (e2e-...).
+      - name: Browser end-to-end tests
+        working-directory: frontend
+        run: npm run e2e
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Dump logs on failure
         if: failure()

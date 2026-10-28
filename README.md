@@ -6,17 +6,17 @@
 production-style engineering project: health checks, uptime and latency tracking,
 alerting, and incident management for cloud services, with a React dashboard on top.
 
-> **Current status: Phase 3 — Alerting and incident management.**
-> You can register HTTP services, have a worker check them on a schedule, trigger manual
-> checks, and read each resource's latest health. Every accepted check is stored as a durable
-> history row with availability/latency/time-series APIs and retention. **On top of that you can
-> define alert rules; each accepted check is evaluated against them in the same transaction, and
-> a firing rule opens exactly one incident that is acknowledged by hand and resolved
-> automatically on recovery**, with a durable event timeline.
+> **Current status: Phase 4 — Monitoring dashboard.**
+> You can register HTTP services, have a worker check them on a schedule, keep a durable history,
+> define alert rules, and have incidents opened, acknowledged and resolved. **A React dashboard now
+> covers all of it against the real API: an overview, resource management, per-resource charts and
+> check history, alert-rule management, and incident triage with timelines.** It runs in Docker next
+> to the API and is tested in a real browser against the full stack.
 >
 > **Not implemented yet:** notifications of any kind (email, chat, webhooks, paging),
-> authentication, the monitoring dashboard (charts and management UI), and cloud deployment.
-> Incidents are visible only through the REST API / Swagger UI. See the [roadmap](#roadmap).
+> authentication (the dashboard and API are local-only, see
+> [Security and deployment limitations](#security-and-deployment-limitations)), and cloud
+> deployment. See the [roadmap](#roadmap).
 
 ---
 
@@ -32,6 +32,7 @@ alerting, and incident management for cloud services, with a React dashboard on 
 - [Monitoring guide](#monitoring-guide)
 - [History and metrics](#history-and-metrics)
 - [Alerts and incidents](#alerts-and-incidents)
+- [Dashboard](#dashboard)
 - [Scheduling and worker design](#scheduling-and-worker-design)
 - [Network safety (SSRF)](#network-safety-ssrf)
 - [Security and deployment limitations](#security-and-deployment-limitations)
@@ -76,7 +77,8 @@ Azure-oriented deployment.
 | Deterministic evaluation with persisted counters, anti-noise streaks | ✅ Phase 3 |
 | Incident lifecycle (open, acknowledge, auto-resolve) with event timeline | ✅ Phase 3 |
 | Notifications (email, chat, webhooks, paging), escalation | Not planned yet |
-| Full React monitoring dashboard | Planned (Phase 4) |
+| React dashboard: overview, resources, charts, history, rules, incidents | ✅ Phase 4 |
+| Browser end-to-end tests against the Docker stack | ✅ Phase 4 |
 | Azure deployment, infrastructure-as-code | Planned (Phase 5) |
 
 ## Architecture
@@ -84,7 +86,7 @@ Azure-oriented deployment.
 ```
                          ┌────────────────────────────┐
 Browser ─► frontend ───► │ backend (FastAPI)          │ ──┐
- (React shell, nginx)    │  /health /ready            │   │
+ (React dashboard)    │  /health /ready            │   │
                          │  /api/v1/resources...      │   ▼
 curl / Swagger ────────► │  manual checks (HTTP out)  │  PostgreSQL ◄──┐
                          └────────────────────────────┘  (resources +  │
@@ -108,7 +110,8 @@ curl / Swagger ────────► │  manual checks (HTTP out)  │  P
   scheduling state (`next_check_at` plus a per-resource lease), **and check history**
   (`resource_check_results`).
 - **migrate** — one-shot job that applies Alembic migrations before backend and worker start.
-- **frontend** — React shell with the API status panel. Not a monitoring dashboard yet.
+- **frontend** — the React dashboard, built to static files and served by nginx. It talks to the
+  backend API directly from the browser (see [Dashboard](#dashboard)).
 
 Layering inside `backend/app/`: `api` (HTTP) → `services` (rules) → `repositories` (SQL),
 with `monitoring` (checker, SSRF policy, executor, scheduler) shared by the API and worker.
@@ -120,8 +123,8 @@ Design notes: [`docs/architecture.md`](docs/architecture.md).
 | -------------- | -------------------------------------------------------------------------- |
 | Backend        | Python 3.12, FastAPI, SQLAlchemy 2, Alembic, psycopg 3, Pydantic Settings, httpx |
 | Database       | PostgreSQL 17                                                              |
-| Frontend       | React 19, TypeScript, Vite                                                 |
-| Testing        | Pytest (+ anyio) ; Vitest + Testing Library                               |
+| Frontend       | React 19, TypeScript, Vite, React Router, TanStack Query, Recharts         |
+| Testing        | Pytest (+ anyio) ; Vitest + Testing Library ; Playwright (browser E2E)    |
 | Code quality   | Ruff (lint + format); ESLint + Prettier                                    |
 | Infrastructure | Docker, Docker Compose, GitHub Actions                                     |
 
@@ -146,10 +149,10 @@ CloudPulse/
 │   ├── alembic/            # migrations (0001 baseline … 0004 alerting)
 │   ├── tests/              # unit tests + PostgreSQL integration tests
 │   ├── pyproject.toml, requirements*.txt, Dockerfile
-├── frontend/               # React shell (App, components, status hook, tests)
+├── frontend/               # React dashboard (src/app, features/, components/, lib/), e2e/ (Playwright)
 ├── scripts/smoke_test.py   # end-to-end test against a running stack (stdlib only)
 ├── infra/                  # placeholder for Phase 5 cloud infrastructure
-├── docs/architecture.md
+├── docs/architecture.md, docs/screenshots/
 ├── .github/workflows/ci.yml
 ├── docker-compose.yml
 ├── .env.example
@@ -700,6 +703,80 @@ about 44 ms because each held the resource lock for its own round trip.) Plans f
 (3,000 rules) and incident listing (5,000 incidents) are asserted to use their indexes with no
 sequential scan. These are small local numbers, not a capacity claim.
 
+## Dashboard
+
+![Overview](docs/screenshots/overview.png)
+
+The dashboard is a single-page React app (served at <http://localhost:3000>) that uses only the
+REST API described above; nothing is mocked and no data is invented. It has a dark-first design,
+works from 375 px phones to wide desktops, and every status is shown with an icon and a text label,
+never colour alone.
+
+| Route | What it shows |
+| --- | --- |
+| `/` | Overview: exact counts for every resource status, active incidents, firing rules, a health distribution, the most severe services first, recent incidents, API/database state |
+| `/resources` | Searchable, filterable, paginated list; add, edit, enable/disable, delete (with confirmation), manual check |
+| `/resources/:id` | Current state; availability and latency summary; response-time and availability charts for 1 h, 24 h, 7 d, 30 d; check history with cursor pagination; the resource's rules and incidents |
+| `/alerts` | All alert rules with state and counters; create, edit, enable/disable, delete with type-specific forms |
+| `/incidents` | Incidents filtered by state (default: active), severity and resource, with cursor pagination |
+| `/incidents/:id` | The incident, the measurement that triggered it, its timeline, and **Acknowledge** |
+
+Screenshots: [resource detail](docs/screenshots/resource-detail.png),
+[incidents](docs/screenshots/incidents.png), [incident detail](docs/screenshots/incident-detail.png).
+
+### What it deliberately says
+
+- **Availability is observation-based**: healthy checks divided by checks that ran. It is labelled as
+  such and is not uptime; a gap in a chart means "no checks", never downtime, and a period with no
+  checks shows "—", not 0% or 100%.
+- **Monitoring URLs are shown as host and path only.** A query string (which can hold a token) is
+  never displayed; its presence is shown as `?…`. URLs are not written to logs or error messages.
+- **Acknowledge never names a person.** There is no authentication, so the timeline shows
+  "Manual (API call, no verified identity)". There is no manual resolve; incidents resolve when the
+  rule's recovery condition is met.
+- **Destructive actions explain themselves.** Deleting a resource states that its history is removed
+  and that incidents it caused are kept; disabling or reconfiguring a firing rule warns that its
+  active incident will be resolved. The rule-per-resource limit is read from the API and enforced
+  in the form.
+- **Failures never blank the page.** Each panel loads independently with loading, empty and error
+  states, a retry button, and distinct messages for an unreachable API, a database outage (503), a
+  missing item (404) and a state conflict (409). A header indicator polls `/health` and `/ready`.
+
+### Data loading and polling
+
+Server state is managed with TanStack Query (`frontend/src/lib/`): a typed API client with a central
+base URL, a 15 s timeout, cancellation, and consistent error classification; retries only for
+transient failures (network, timeout, 5xx), never for 404/409/422. Intervals pause automatically
+while the browser tab is hidden.
+
+| Data | Default poll | Build-time override |
+| --- | --- | --- |
+| Overview, resource list/detail, API status | 15 s | `VITE_POLL_OVERVIEW_MS`, `VITE_POLL_RESOURCES_MS`, `VITE_POLL_SYSTEM_MS` |
+| Incidents, alert rules | 20 s | `VITE_POLL_INCIDENTS_MS`, `VITE_POLL_RULES_MS` |
+| Check history (first page only) | 30 s | `VITE_POLL_HISTORY_MS` |
+| Charts and summaries | 60 s | `VITE_POLL_CHARTS_MS` |
+
+`0` disables a poll. Resolved incidents stop polling. Mutations invalidate exactly the data they
+change (for example a rule change refreshes rules, incidents and the overview counts).
+
+### API additions for the dashboard
+
+Four small, read-only additions (no schema change, no migration), each with tests:
+
+- `GET /api/v1/overview`: aggregate counts computed in SQL over every resource, rule and incident
+  (so the dashboard never counts "the first page"), plus `limits.max_rules_per_resource`.
+- `GET /api/v1/alert-rules`: a cross-resource rule list (filters `resource_id`, `current_state`,
+  `severity`, `is_enabled`; `limit`/`offset`) including each rule's resource name.
+- `GET /api/v1/resources?q=`: case-insensitive name search (wildcards escaped).
+- `GET /api/v1/incidents?active=true|false`: open and acknowledged vs resolved.
+
+### Running the dashboard
+
+`docker compose up --build` serves it at <http://localhost:3000> (nginx falls back to `index.html`
+so deep links such as `/incidents/<id>` work). For development: `cd frontend && npm run dev` (port
+5173; the API's CORS list already allows it). `VITE_API_URL` is the API origin *as the browser sees
+it* and is baked in at build time.
+
 ## Scheduling and worker design
 
 **Source of truth is PostgreSQL**, not memory. Each resource row holds `next_check_at` and a
@@ -783,7 +860,10 @@ start** with it set when `ENVIRONMENT` is `staging` or `production`.
 - History grows by `resources × (86400 / interval)` rows per day; size retention and check
   intervals accordingly. PostgreSQL is used as-is (no partitioning or time-series extension).
 - Checks are `GET` only, with response timing measured to headers; bodies are never read.
-- **No notifications.** Alerts produce incidents you read through the API; nothing emails, pages or
+- **The dashboard is as unauthenticated as the API.** It stores nothing in the browser (no tokens or
+  credentials, no persisted state), but anyone who can open it can change or delete resources and
+  rules. It is for local use on a trusted machine; ports stay bound to `127.0.0.1`.
+- **No notifications.** Alerts produce incidents you read in the dashboard or through the API; nothing emails, pages or
   calls a webhook. Incident management (acknowledge, rule edits) is as unauthenticated as the rest of
   the API: `MANUAL` in an incident timeline means "an API caller", not a verified person.
 
@@ -850,6 +930,9 @@ npm ci
 npm run dev                              # http://localhost:5173
 npm run build && npm run preview         # production build preview
 ```
+
+The dev server reads `VITE_API_URL` (default `http://localhost:8000`) and the optional
+`VITE_POLL_*` intervals from the environment.
 
 ## Database migrations
 
@@ -922,6 +1005,36 @@ npm run typecheck         # TypeScript
 npm run build             # type-check + production build
 ```
 
+The Vitest suite (about 220 tests) covers the API client contract (404, 409, 422, 503, network and
+timeout failures), form validation and request building, every page's loading/empty/error states,
+create/edit/delete flows with confirmations, enable/disable, manual checks, acknowledge (including the
+409 race and duplicate-submit protection), pagination, filters, the chart data builder and chart empty
+states, routing and accessibility attributes. Tests use an in-memory fake of the API (`src/test/`).
+
+### Browser end-to-end (Playwright)
+
+Start the stack with the demo target, then run the tests in a real Chromium:
+
+```bash
+MONITORING_ALLOWED_LOCAL_HOSTS=demo-target:8080 MONITORING_MIN_INTERVAL_SECONDS=5 \
+  docker compose --profile demo up --build --detach --wait
+cd frontend
+npm ci && npx playwright install chromium
+npm run e2e
+```
+
+PowerShell: set the two variables with `$env:NAME = "value"` first. The specs
+(`frontend/e2e/`) are: the full workflow (add a resource, watch it become healthy, view charts and
+history, create a rule, break the resource so an incident opens, view and acknowledge it, fix it and
+watch it resolve, delete the resource); resilience (unreachable API, 503, unknown ids); and layout
+(no horizontal overflow at 375, 430, 768, 1024, 1440 and 1920 px, drawer, dialogs, keyboard focus,
+reduced motion). Every test also fails on any browser console error, uncaught exception, or request
+to a host other than the dashboard and the API.
+
+The tests create and delete only resources they name `e2e-…`, and never stop the shared demo
+container: "breaking" the service means changing that resource's own URL to a path that answers 404.
+Set `E2E_SCREENSHOTS=1` to refresh `docs/screenshots/`.
+
 ## Health and readiness endpoints
 
 | Endpoint | Purpose | Depends on DB | Success | Failure |
@@ -940,10 +1053,11 @@ Failure details are logged server-side and never returned. Every response carrie
 
 - **backend** — Ruff lint and format check; `alembic upgrade head` and `alembic check` against a
   PostgreSQL 17 service container; full Pytest including the integration tests.
-- **frontend** — `npm ci`, ESLint, Prettier check, Vitest, production build.
+- **frontend** — `npm ci`, ESLint, Prettier check, TypeScript check, Vitest, production build.
 - **docker** — builds the images, starts the full stack (with the demo target), waits for health,
   and runs `scripts/smoke_test.py --docker-control` end to end (history, metrics, worker restart, and the
-  alert-to-incident lifecycle).
+  alert-to-incident lifecycle). It then installs Chromium and runs the Playwright browser tests against
+  that same stack, uploading traces if they fail.
 
 Nothing is deployed.
 
@@ -967,14 +1081,13 @@ Nothing is deployed.
 | 0 | Foundation: API skeleton, DB/migrations, logging, Docker, CI, dashboard shell | Done |
 | 1 | Resource registry, scheduled HTTP checks, latest health, manual checks, SSRF protection | Done |
 | 2 | Metrics ingestion and history: atomic per-check records, availability/latency APIs, time series, retention | Done |
-| 3 | Alerting and incidents: rules, deterministic evaluation, incident lifecycle and timeline | **Current** |
-| 4 | Full React monitoring dashboard | Planned |
+| 3 | Alerting and incidents: rules, deterministic evaluation, incident lifecycle and timeline | Done |
+| 4 | Monitoring dashboard: React UI over every API, charts, browser E2E tests | **Current** |
 | 5 | Cloud deployment: Azure hosting, CD pipeline, infrastructure-as-code if justified | Planned |
 
 Phase boundaries beyond the current phase are provisional and refined as each phase begins.
-### Phase 4 considerations
+### Considerations for later phases
 
-Everything a dashboard needs already has an API: resources and status, history, summaries and
-time-series, rules with live state and counters, and incidents with timelines. Notification delivery
-(email, chat, webhooks) is a separate piece of work that would read `incident_events`; it would need its
-own retry and failure handling and must not run inside the check transaction.
+Notification delivery (email, chat, webhooks) is separate work that would read `incident_events`; it
+would need its own retry and failure handling and must not run inside the check transaction. Any
+deployment beyond a trusted local machine needs an authentication and authorization layer first.

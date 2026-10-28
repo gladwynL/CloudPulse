@@ -55,6 +55,9 @@ class IncidentStatus(enum.StrEnum):
     RESOLVED = "RESOLVED"
 
 
+ACTIVE_INCIDENT_STATUSES = (IncidentStatus.OPEN, IncidentStatus.ACKNOWLEDGED)
+
+
 class ResolutionReason(enum.StrEnum):
     RECOVERED = "RECOVERED"
     RULE_DISABLED = "RULE_DISABLED"

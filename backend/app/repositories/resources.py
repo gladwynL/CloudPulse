@@ -75,8 +75,12 @@ def list_page(
     offset: int,
     is_enabled: bool | None = None,
     status: ResourceStatus | None = None,
+    name_contains: str | None = None,
 ) -> tuple[list[M], int]:
     filters = []
+    if name_contains:
+        escaped = name_contains.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        filters.append(M.name.ilike(f"%{escaped}%", escape="\\"))
     if is_enabled is not None:
         filters.append(M.is_enabled.is_(is_enabled))
     if status is not None:

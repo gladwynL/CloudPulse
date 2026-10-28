@@ -1,9 +1,9 @@
 # CloudPulse Architecture
 
-This document describes the architecture as implemented today (Phase 3) and the direction it
+This document describes the architecture as implemented today (Phase 4) and the direction it
 is designed to grow in. Anything under "Planned" does not exist yet.
 
-## Current (Phase 3)
+## Current (Phase 4)
 
 ```
  Browser / curl / Swagger
@@ -11,7 +11,7 @@ is designed to grow in. Anything under "Planned" does not exist yet.
    ▼
 ┌─────────────────────┐   HTTP   ┌──────────────────────────────┐   SQL   ┌────────────┐
 │ frontend            │ ───────► │ backend (FastAPI)            │ ──────► │ PostgreSQL │
-│ React shell (nginx) │          │ /health /ready               │         │            │
+│ React dashboard     │          │ /health /ready               │         │            │
 └─────────────────────┘          │ /api/v1/resources…           │         │ monitored_ │
                                  │ manual check ──► target URL  │         │ resources  │
                                  └──────────────────────────────┘         │ (+ leases) │
@@ -224,9 +224,56 @@ JSON logs to stdout. Monitoring events (`cloudpulse.monitoring`) carry `resource
 `response_time_ms`, `duration_ms`, `stored`. The HTTP client's own request logging is disabled
 because it prints full URLs. Idle scheduler ticks log nothing; claims and completions do.
 
+## Frontend architecture (Phase 4)
+
+A single-page app in `frontend/src`, built with Vite and served as static files by nginx
+(`try_files … /index.html`, so deep links work). It calls the REST API directly from the browser; there
+is no backend-for-frontend.
+
+| Folder | Responsibility |
+| --- | --- |
+| `app/` | Root providers (error boundary, TanStack Query, toasts, router) and lazy route table |
+| `features/<name>/` | One folder per area (overview, resources, metrics, alerts, incidents, system): pages, forms, and the query/mutation hooks for that area |
+| `components/ui`, `components/layout`, `components/charts` | Shared primitives (badges, dialogs built on native `<dialog>`, fields, states, pagers), the app shell, chart wrappers |
+| `lib/api` | Wire types mirroring the backend schemas, the typed client (timeout, cancellation, error classification), one function per endpoint |
+| `lib/` | Polling config, query client and keys, formatting and rule-description helpers |
+| `styles/` | Design tokens (dark first, light supported) and plain CSS |
+
+**Routes:** `/`, `/resources`, `/resources/:id`, `/alerts`, `/incidents`, `/incidents/:id` (pages are
+code-split; the chart library loads only with the resource detail page).
+
+**Server state** is TanStack Query only; there is no client-side copy of server data. Filters, search,
+pagination offsets and the chart period live in the URL so views are linkable. Polling intervals
+(`lib/polling.ts`) are per data type, configurable at build time, and pause while the tab is hidden.
+Paged histories poll only their first page. Mutations invalidate the queries they affect; a deleted
+resource's queries are cancelled and dropped rather than refetched.
+
+**Errors** are classified once (network, timeout, 404, 409, 422 with per-field messages, 503, other) so
+each screen can say something accurate. Retries apply only to transient failures.
+
+**Data honesty:** buckets are expanded onto the time grid with *null* gaps, never zero; availability is
+labelled check-based; a period with no checks is "unknown". Monitoring URLs are displayed as host and
+path only.
+
+**Security boundary:** the app is unauthenticated and stores nothing in browser storage. It must stay
+on a trusted local network. Request URLs and query strings are never placed in UI or error text.
+
+### Endpoints added for the dashboard
+
+Read-only, no migration: `GET /api/v1/overview` (SQL aggregates over all rows plus the per-resource rule
+limit), `GET /api/v1/alert-rules` (global list with filters and the resource name),
+`GET /api/v1/resources?q=` (escaped, case-insensitive name search), and `GET /api/v1/incidents?active=`.
+
+### Frontend testing
+
+Vitest + Testing Library against an in-memory fake of the API (`src/test/mockApi.ts`), and Playwright
+(`frontend/e2e`) against the real Docker stack: the full add → check → rule → incident → acknowledge →
+recover → delete workflow, API-outage behaviour, and layout/accessibility at six viewport widths, with a
+per-test audit for console errors and external requests. CI runs the Playwright suite in the docker job.
+
 ### Known limitations
 
-No authentication (do not expose the API; incident `MANUAL` actors are not verified identities); no notifications (incidents are records read through the API); incidents are never pruned; a target that flaps faster than the configured streaks can open repeatedly; one worker; history retained for a bounded period only
+No authentication on the API or the dashboard (do not expose either; incident `MANUAL` actors are not verified identities); no notifications (incidents are records shown in the dashboard and API); incidents are never pruned; a target that flaps faster than the configured streaks can open repeatedly; one worker; history retained for a bounded period only
 (no downsampling, so no long-term trends); availability is check-based, not continuous uptime; plain
 PostgreSQL tables without partitioning (adequate for portfolio scale, to be revisited if volume grows);
 `GET`-only checks with timing to response headers; the httpx transport hook above is an implementation
@@ -237,8 +284,6 @@ dependency.
 - **Notifications** (not scheduled): delivery of incident events by email/chat/webhook. It should consume
   `incident_events` outside the check transaction with its own retries, so a slow provider can never delay
   or fail a check.
-- **Phase 4 — dashboard.** Resource management, status, history, rules and incidents in the React app; every
-  needed read already has an API.
 - **Phase 5 — deployment.** Azure hosting and, if justified, infrastructure-as-code (see
   [`infra/`](../infra/README.md)); an authentication/authorization layer belongs before any
   public exposure.

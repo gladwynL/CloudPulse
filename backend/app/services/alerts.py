@@ -30,8 +30,10 @@ from app.alerting.lifecycle import acknowledge_incident, reset_rule
 from app.core.config import Settings
 from app.models.alert import AlertRule, Incident, IncidentEvent
 from app.models.enums import (
+    ACTIVE_INCIDENT_STATUSES,
     AlertRuleType,
     AlertSeverity,
+    AlertState,
     IncidentStatus,
     ResolutionReason,
 )
@@ -146,6 +148,27 @@ def list_rules(
     return repo.list_rules(session, resource_id, limit=limit, offset=offset)
 
 
+def list_all_rules(
+    session: Session,
+    *,
+    resource_id: uuid.UUID | None,
+    state: AlertState | None,
+    severity: AlertSeverity | None,
+    is_enabled: bool | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[tuple[AlertRule, str]], int]:
+    return repo.list_all_rules(
+        session,
+        resource_id=resource_id,
+        state=state,
+        severity=severity,
+        is_enabled=is_enabled,
+        limit=limit,
+        offset=offset,
+    )
+
+
 def _lock_rule(session: Session, rule_id: uuid.UUID) -> AlertRule:
     """Resource row, then rule row. A rule that vanishes meanwhile is simply not found."""
     unlocked = repo.get_rule(session, rule_id)
@@ -225,7 +248,16 @@ def list_incidents(
     end: datetime | None,
     limit: int | None,
     cursor: str | None,
+    active: bool | None = None,
 ) -> tuple[list[Incident], int, str | None]:
+    if active is True and status is not None and status not in ACTIVE_INCIDENT_STATUSES:
+        raise ResourceValidationError(
+            "active", "cannot be combined with a resolved status", location="query"
+        )
+    if active is False and status is not None and status is not IncidentStatus.RESOLVED:
+        raise ResourceValidationError(
+            "active", "active=false cannot be combined with an active status", location="query"
+        )
     start_utc = _as_utc(start) if start else None
     end_utc = _as_utc(end) if end else None
     if start_utc and end_utc and start_utc >= end_utc:
@@ -240,6 +272,7 @@ def list_incidents(
     rows = repo.list_incidents(
         session,
         status=status,
+        active=active,
         severity=severity,
         resource_id=resource_id,
         start=start_utc,

@@ -13,7 +13,8 @@ from sqlalchemy import Select, func, select, tuple_
 from sqlalchemy.orm import Session
 
 from app.models.alert import AlertRule, Incident, IncidentEvent
-from app.models.enums import AlertSeverity, IncidentStatus
+from app.models.enums import AlertSeverity, AlertState, IncidentStatus
+from app.models.resource import MonitoredResource
 
 ACTIVE = (IncidentStatus.OPEN, IncidentStatus.ACKNOWLEDGED)
 
@@ -72,6 +73,41 @@ def list_rules(
     return items, total
 
 
+def list_all_rules(
+    session: Session,
+    *,
+    resource_id: uuid.UUID | None,
+    state: AlertState | None,
+    severity: AlertSeverity | None,
+    is_enabled: bool | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[tuple[AlertRule, str]], int]:
+    """Rules across all resources (with the resource name), oldest first, offset-paginated."""
+    filters = []
+    if resource_id is not None:
+        filters.append(AlertRule.resource_id == resource_id)
+    if state is not None:
+        filters.append(AlertRule.current_state == state)
+    if severity is not None:
+        filters.append(AlertRule.severity == severity)
+    if is_enabled is not None:
+        filters.append(AlertRule.is_enabled.is_(is_enabled))
+
+    total = session.execute(
+        select(func.count()).select_from(AlertRule).where(*filters)
+    ).scalar_one()
+    rows = session.execute(
+        select(AlertRule, MonitoredResource.name)
+        .join(MonitoredResource, MonitoredResource.id == AlertRule.resource_id)
+        .where(*filters)
+        .order_by(AlertRule.created_at, AlertRule.id)
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return [(rule, name) for rule, name in rows], total
+
+
 # --- Incidents ----------------------------------------------------------------------------
 
 
@@ -112,6 +148,7 @@ def get_incident(
 def list_incidents_stmt(
     *,
     status: IncidentStatus | None,
+    active: bool | None = None,
     severity: AlertSeverity | None,
     resource_id: uuid.UUID | None,
     start: datetime | None,
@@ -124,6 +161,10 @@ def list_incidents_stmt(
     stmt = select(Incident)
     if status is not None:
         stmt = stmt.where(Incident.status == status)
+    if active is True:
+        stmt = stmt.where(Incident.status.in_(ACTIVE))
+    elif active is False:
+        stmt = stmt.where(Incident.status == IncidentStatus.RESOLVED)
     if severity is not None:
         stmt = stmt.where(Incident.severity == severity)
     if resource_id is not None:

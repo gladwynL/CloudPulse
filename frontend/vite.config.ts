@@ -17,5 +17,19 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
     restoreMocks: true,
+    // Deterministic tests: a fixed API origin and no background polling.
+    env: {
+      VITE_API_URL: 'http://api.test',
+      VITE_APP_ENV: 'test',
+      VITE_POLL_OVERVIEW_MS: '0',
+      VITE_POLL_RESOURCES_MS: '0',
+      VITE_POLL_INCIDENTS_MS: '0',
+      VITE_POLL_RULES_MS: '0',
+      VITE_POLL_CHARTS_MS: '0',
+      VITE_POLL_HISTORY_MS: '0',
+      VITE_POLL_SYSTEM_MS: '0',
+    },
+    // Playwright specs live in e2e/ and run under their own runner.
+    exclude: ['node_modules', 'dist', 'e2e/**'],
   },
 });

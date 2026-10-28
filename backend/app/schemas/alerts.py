@@ -109,8 +109,21 @@ class AlertRuleResponse(BaseModel):
     updated_at: UtcDatetime
 
 
+class AlertRuleListItem(AlertRuleResponse):
+    """A rule in a cross-resource listing, with the name of the resource it belongs to."""
+
+    resource_name: str
+
+
 class AlertRuleListResponse(BaseModel):
     items: list[AlertRuleResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class AlertRuleGlobalListResponse(BaseModel):
+    items: list[AlertRuleListItem]
     total: int
     limit: int
     offset: int
@@ -166,6 +179,8 @@ class IncidentTimelineResponse(BaseModel):
 
 __all__ = [
     "AlertRuleCreate",
+    "AlertRuleGlobalListResponse",
+    "AlertRuleListItem",
     "AlertRuleListResponse",
     "AlertRuleResponse",
     "AlertRuleUpdate",

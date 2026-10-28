@@ -11,9 +11,11 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Response, status
 
 from app.api.deps import AppSettings, DbSession, reject_unknown_query_params
-from app.models.enums import AlertSeverity, IncidentStatus
+from app.models.enums import AlertSeverity, AlertState, IncidentStatus
 from app.schemas.alerts import (
     AlertRuleCreate,
+    AlertRuleGlobalListResponse,
+    AlertRuleListItem,
     AlertRuleListResponse,
     AlertRuleResponse,
     AlertRuleUpdate,
@@ -78,6 +80,48 @@ def list_alert_rules(
     )
 
 
+@router.get(
+    "/alert-rules",
+    response_model=AlertRuleGlobalListResponse,
+    dependencies=[
+        reject_unknown_query_params(
+            "resource_id", "current_state", "severity", "is_enabled", "limit", "offset"
+        )
+    ],
+    summary="List alert rules across all resources",
+)
+def list_all_alert_rules(
+    session: DbSession,
+    resource_id: uuid.UUID | None = None,
+    current_state: AlertState | None = None,
+    severity: AlertSeverity | None = None,
+    is_enabled: bool | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AlertRuleGlobalListResponse:
+    """Every rule with its resource's name, oldest first (then id). Filters are optional."""
+    rows, total = service.list_all_rules(
+        session,
+        resource_id=resource_id,
+        state=current_state,
+        severity=severity,
+        is_enabled=is_enabled,
+        limit=limit,
+        offset=offset,
+    )
+    return AlertRuleGlobalListResponse(
+        items=[
+            AlertRuleListItem(
+                **AlertRuleResponse.model_validate(rule).model_dump(), resource_name=name
+            )
+            for rule, name in rows
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.get("/alert-rules/{rule_id}", response_model=AlertRuleResponse, responses=_RULE_404)
 def get_alert_rule(rule_id: uuid.UUID, session: DbSession) -> AlertRuleResponse:
     return AlertRuleResponse.model_validate(service.get_rule(session, rule_id))
@@ -109,7 +153,7 @@ def delete_alert_rule(rule_id: uuid.UUID, session: DbSession) -> Response:
     response_model=IncidentListResponse,
     dependencies=[
         reject_unknown_query_params(
-            "status", "severity", "resource_id", "start", "end", "limit", "cursor"
+            "status", "active", "severity", "resource_id", "start", "end", "limit", "cursor"
         )
     ],
 )
@@ -117,6 +161,7 @@ def list_incidents(
     session: DbSession,
     settings: AppSettings,
     status_filter: Annotated[IncidentStatus | None, Query(alias="status")] = None,
+    active: bool | None = None,
     severity: AlertSeverity | None = None,
     resource_id: uuid.UUID | None = None,
     start: datetime | None = None,
@@ -125,12 +170,14 @@ def list_incidents(
     cursor: str | None = None,
 ) -> IncidentListResponse:
     """Most recently triggered first. `start`/`end` filter on `triggered_at` (`[start, end)`, UTC;
-    naive values are read as UTC). Pagination is keyset-based: pass `next_cursor` as `cursor`.
+    naive values are read as UTC). `active=true` means OPEN or ACKNOWLEDGED (`false`: RESOLVED).
+    Pagination is keyset-based: pass `next_cursor` as `cursor`.
     Incidents outlive their rule and resource (those ids become null; names are snapshotted)."""
     items, page_size, next_cursor = service.list_incidents(
         session,
         settings,
         status=status_filter,
+        active=active,
         severity=severity,
         resource_id=resource_id,
         start=start,

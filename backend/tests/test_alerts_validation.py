@@ -186,3 +186,31 @@ def test_incident_list_rejects_invalid_and_unsupported_parameters(vclient: TestC
     response = vclient.get(f"/api/v1/incidents?{query}")
     assert response.status_code == 422
     assert all(loc[0] == "query" for loc in locs(response))
+
+
+# --- dashboard read endpoints (no database reached) -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "limit=0",
+        "limit=101",
+        "offset=-1",
+        "current_state=BROKEN",
+        "severity=FATAL",
+        "is_enabled=sometimes",
+        "resource_id=nope",
+        "bogus=1",
+    ],
+)
+def test_global_rule_list_rejects_invalid_parameters(vclient: TestClient, query: str):
+    response = vclient.get(f"/api/v1/alert-rules?{query}")
+    assert response.status_code == 422
+    assert all(loc[0] == "query" for loc in locs(response))
+
+
+def test_overview_takes_no_parameters(vclient: TestClient):
+    response = vclient.get("/api/v1/overview?refresh=1")
+    assert response.status_code == 422
+    assert locs(response) == [["query", "refresh"]]

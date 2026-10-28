@@ -112,9 +112,15 @@ def list_resources(
     offset: int,
     is_enabled: bool | None,
     status: ResourceStatus | None,
+    name_contains: str | None = None,
 ) -> Page:
     items, total = repo.list_page(
-        session, limit=limit, offset=offset, is_enabled=is_enabled, status=status
+        session,
+        limit=limit,
+        offset=offset,
+        is_enabled=is_enabled,
+        status=status,
+        name_contains=name_contains,
     )
     return Page(items, total)
 
