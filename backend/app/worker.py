@@ -23,6 +23,7 @@ from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.db.session import get_engine, get_session_factory
 from app.monitoring.checker import HttpChecker
+from app.monitoring.retention import RetentionTask
 from app.monitoring.scheduler import Scheduler
 from app.monitoring.security import TargetPolicy
 from app.monitoring.store import SqlCheckStore
@@ -69,6 +70,13 @@ async def run_worker(settings: Settings) -> None:
         on_healthy_tick=lambda: _heartbeat(heartbeat_path),
     )
 
+    retention = RetentionTask(
+        get_session_factory(),
+        retention_days=settings.metrics_retention_days,
+        batch_size=settings.metrics_cleanup_batch_size,
+        interval_seconds=settings.metrics_cleanup_interval_hours * 3600,
+    )
+
     stop = asyncio.Event()
     _install_signal_handlers(asyncio.get_running_loop(), stop)
     logger.info(
@@ -85,7 +93,8 @@ async def run_worker(settings: Settings) -> None:
             extra={"hosts": settings.monitoring_allowed_local_hosts},
         )
     try:
-        await scheduler.run(stop)
+        # Retention shares the process but not the scheduler's loop or failure modes.
+        await asyncio.gather(scheduler.run(stop), retention.run(stop))
     finally:
         await checker.aclose()
         get_engine().dispose()

@@ -14,7 +14,7 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.monitoring.types import CheckResult, ClaimedCheck, ClaimOutcome
+from app.monitoring.types import CheckResult, CheckSource, ClaimedCheck, ClaimOutcome
 from app.repositories import resources as repo
 
 
@@ -23,7 +23,9 @@ class CheckStore(Protocol):
 
     async def claim(self, resource_id: uuid.UUID) -> ClaimedCheck | ClaimOutcome: ...
 
-    async def complete(self, claim: ClaimedCheck, result: CheckResult) -> bool: ...
+    async def complete(
+        self, claim: ClaimedCheck, result: CheckResult, source: CheckSource
+    ) -> bool: ...
 
     async def release(self, claim: ClaimedCheck) -> None: ...
 
@@ -46,8 +48,8 @@ class SqlCheckStore:
     async def claim(self, resource_id: uuid.UUID) -> ClaimedCheck | ClaimOutcome:
         return await asyncio.to_thread(self._claim, resource_id)
 
-    async def complete(self, claim: ClaimedCheck, result: CheckResult) -> bool:
-        return await asyncio.to_thread(self._complete, claim, result)
+    async def complete(self, claim: ClaimedCheck, result: CheckResult, source: CheckSource) -> bool:
+        return await asyncio.to_thread(self._complete, claim, result, source)
 
     async def release(self, claim: ClaimedCheck) -> None:
         await asyncio.to_thread(self._release, claim)
@@ -70,9 +72,11 @@ class SqlCheckStore:
             session.commit()
             return outcome
 
-    def _complete(self, claim: ClaimedCheck, result: CheckResult) -> bool:
+    def _complete(self, claim: ClaimedCheck, result: CheckResult, source: CheckSource) -> bool:
+        # One transaction: latest-state update + history insert commit together or not at all.
+        # An exception skips commit and the session closes with a rollback.
         with self._session_factory() as session:
-            stored = repo.complete(session, claim, result)
+            stored = repo.complete(session, claim, result, source)
             session.commit()
             return stored
 

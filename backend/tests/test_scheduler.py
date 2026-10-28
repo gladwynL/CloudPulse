@@ -61,7 +61,7 @@ class FakeStore:
     async def claim(self, resource_id: uuid.UUID) -> ClaimedCheck | ClaimOutcome:
         raise NotImplementedError
 
-    async def complete(self, claim: ClaimedCheck, result: CheckResult) -> bool:
+    async def complete(self, claim: ClaimedCheck, result: CheckResult, source: CheckSource) -> bool:
         if claim.resource_id in self.complete_fails_for:
             raise ConnectionError("database unavailable")
         if self.leased.get(claim.resource_id) != claim.lease_token:
@@ -303,7 +303,7 @@ async def test_executor_logs_structured_fields_without_the_full_url(
     assert outcome.stored is True
     (record,) = [r for r in caplog.records if r.name == "cloudpulse.monitoring"]
     assert record.resource_id == str(resource)
-    assert record.check_source == "manual"
+    assert record.check_source == "MANUAL"
     assert record.check_status == "HEALTHY"
     assert record.http_status_code == 200
     assert record.response_time_ms == 12.5
@@ -342,3 +342,27 @@ async def test_executor_releases_the_lease_when_cancelled():
         await task
 
     assert store.released == [resource]
+
+
+async def test_executor_logs_and_propagates_a_failed_persistence_without_leaking_details(
+    caplog: pytest.LogCaptureFixture,
+):
+    resource = uuid.uuid4()
+    store = FakeStore(complete_fails_for={resource})
+    claim = claim_for(resource, store, url="https://example.com/p?token=SECRET123")
+
+    with (
+        caplog.at_level(logging.INFO, logger="cloudpulse.monitoring"),
+        pytest.raises(ConnectionError),
+    ):
+        await execute_claimed_check(store, FakeChecker(), claim, CheckSource.MANUAL)
+
+    (record,) = [r for r in caplog.records if r.getMessage() == "failed to persist check result"]
+    assert record.levelno == logging.ERROR
+    assert (record.resource_id, record.check_source, record.error) == (
+        str(resource),
+        "MANUAL",
+        "ConnectionError",
+    )
+    assert "SECRET123" not in caplog.text and "database unavailable" not in caplog.text
+    assert resource not in store.completed

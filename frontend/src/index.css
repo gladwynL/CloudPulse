@@ -363,6 +363,11 @@ code {
   background: var(--color-accent-soft);
 }
 
+.roadmap__tag--done {
+  color: var(--color-ok);
+  background: var(--color-ok-soft);
+}
+
 /* Footer */
 .footer {
   border-top: 1px solid var(--color-border);

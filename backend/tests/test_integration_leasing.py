@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
+from app.models.enums import CheckSource
 from app.models.resource import ResourceStatus
 from app.monitoring.scheduler import Scheduler
 from app.monitoring.security import TargetPolicy
@@ -43,7 +44,7 @@ def claim_one(factory: Factory, resource_id: uuid.UUID):
 
 def complete(factory: Factory, claim, result: CheckResult) -> bool:
     with factory() as session:
-        stored = repo.complete(session, claim, result)
+        stored = repo.complete(session, claim, result, CheckSource.SCHEDULED)
         session.commit()
         return stored
 
@@ -85,7 +86,9 @@ def test_claims_are_ordered_by_due_time_and_respect_the_limit(session_factory: F
     first = claim_due(session_factory, limit=2)
     second = claim_due(session_factory, limit=2)
 
-    assert [c.resource_id for c in first] == [oldest, middle]
+    # Selection is by due time (oldest first); UPDATE ... RETURNING does not promise the order of
+    # the rows within a batch, so compare the selected sets.
+    assert {c.resource_id for c in first} == {oldest, middle}
     assert [c.resource_id for c in second] == [newest]
 
 

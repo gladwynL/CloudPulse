@@ -4,16 +4,36 @@ These endpoints are unauthenticated in Phase 1. Do not expose the API to an untr
 """
 
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response, status
 from fastapi.concurrency import run_in_threadpool
 
-from app.api.deps import AppSettings, CheckerDep, CheckStoreDep, DbSession, PolicyDep
+from app.api.deps import (
+    AppSettings,
+    CheckerDep,
+    CheckStoreDep,
+    DbSession,
+    PolicyDep,
+    reject_unknown_query_params,
+)
 from app.api.errors import CheckConflictError
 from app.models.resource import ResourceStatus
 from app.monitoring.executor import execute_claimed_check
 from app.monitoring.types import CheckSource, ClaimOutcome
+from app.schemas.metrics import (
+    CheckCounts,
+    CheckHistoryResponse,
+    CheckResultResponse,
+    CheckStatus,
+    IntervalChoice,
+    LatencyStats,
+    MetricsSummaryResponse,
+    TimeseriesBucket,
+    TimeseriesResponse,
+    TimeWindowResponse,
+)
 from app.schemas.resource import (
     ResourceCreate,
     ResourceListResponse,
@@ -21,6 +41,7 @@ from app.schemas.resource import (
     ResourceStatusResponse,
     ResourceUpdate,
 )
+from app.services import metrics as metrics_service
 from app.services import resources as service
 
 router = APIRouter(prefix="/resources", tags=["resources"])
@@ -127,3 +148,136 @@ async def trigger_check(
 
     resource = await run_in_threadpool(service.get_resource, session, resource_id)
     return ResourceStatusResponse.model_validate(resource)
+
+
+# --- History and metrics ----------------------------------------------------------------
+
+_WINDOW_NOTE = (
+    "Timestamps are ISO 8601; naive values are read as UTC (use a trailing `Z`, since a literal "
+    "`+` in a query string must be URL-encoded). The window is `[start, end)`: start inclusive, "
+    "end exclusive."
+)
+
+
+@router.get(
+    "/{resource_id}/checks",
+    response_model=CheckHistoryResponse,
+    responses=_NOT_FOUND,
+    dependencies=[
+        reject_unknown_query_params("start", "end", "status", "limit", "cursor"),
+    ],
+    summary="Historical check results",
+)
+def list_checks(
+    resource_id: uuid.UUID,
+    session: DbSession,
+    settings: AppSettings,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    status_filter: Annotated[CheckStatus | None, Query(alias="status")] = None,
+    limit: int | None = None,
+    cursor: str | None = None,
+) -> CheckHistoryResponse:
+    """Newest first, ordered by `(checked_at, id)` descending. Pagination is keyset-based: pass
+    the returned `next_cursor` as `cursor` to get the next (older) page. Defaults to the last
+    24 hours."""
+    page = metrics_service.get_history(
+        session,
+        resource_id,
+        settings,
+        start=start,
+        end=end,
+        status=ResourceStatus(status_filter) if status_filter else None,
+        limit=limit,
+        cursor=cursor,
+    )
+    return CheckHistoryResponse(
+        resource_id=resource_id,
+        window=TimeWindowResponse(start=page.window.start, end=page.window.end),
+        items=[CheckResultResponse.model_validate(row) for row in page.items],
+        limit=page.limit,
+        next_cursor=page.next_cursor,
+    )
+
+
+@router.get(
+    "/{resource_id}/metrics/summary",
+    response_model=MetricsSummaryResponse,
+    responses=_NOT_FOUND,
+    dependencies=[reject_unknown_query_params("start", "end")],
+    summary="Availability and latency summary",
+)
+def get_metrics_summary(
+    resource_id: uuid.UUID,
+    session: DbSession,
+    settings: AppSettings,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> MetricsSummaryResponse:
+    """Check-based availability (`healthy / total * 100`) and latency statistics over a window.
+    Availability is observation-based, not continuously measured uptime. Latency covers checks
+    that received an HTTP response."""
+    summary = metrics_service.get_summary(session, resource_id, settings, start=start, end=end)
+    row = summary.row
+    f = metrics_service.to_float
+    return MetricsSummaryResponse(
+        resource_id=resource_id,
+        window=TimeWindowResponse(start=summary.window.start, end=summary.window.end),
+        checks=CheckCounts(
+            total=row.total, healthy=row.healthy, degraded=row.degraded, down=row.down
+        ),
+        availability_percent=summary.availability_percent,
+        latency=LatencyStats(
+            samples=row.latency_samples,
+            avg_ms=f(row.avg_ms),
+            min_ms=f(row.min_ms),
+            max_ms=f(row.max_ms),
+            p50_ms=f(row.p50_ms),
+            p95_ms=f(row.p95_ms),
+        ),
+        first_checked_at=row.first_checked_at,
+        last_checked_at=row.last_checked_at,
+    )
+
+
+@router.get(
+    "/{resource_id}/metrics/timeseries",
+    response_model=TimeseriesResponse,
+    responses=_NOT_FOUND,
+    dependencies=[reject_unknown_query_params("start", "end", "interval")],
+    summary="Time-bucketed metrics",
+)
+def get_metrics_timeseries(
+    resource_id: uuid.UUID,
+    session: DbSession,
+    settings: AppSettings,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    interval: IntervalChoice = "auto",
+) -> TimeseriesResponse:
+    """Per-bucket counts, availability, average and p95 latency. Buckets are UTC-aligned
+    (`1m`, `5m`, `15m`, `1h`, `1d`); `auto` picks the finest interval within the bucket limit.
+    Only buckets containing at least one check are returned: a missing bucket means no
+    observations, **not** downtime. The first/last bucket may be partial."""
+    series = metrics_service.get_timeseries(
+        session, resource_id, settings, start=start, end=end, interval=interval
+    )
+    f = metrics_service.to_float
+    return TimeseriesResponse(
+        resource_id=resource_id,
+        window=TimeWindowResponse(start=series.window.start, end=series.window.end),
+        interval=series.interval,
+        buckets=[
+            TimeseriesBucket(
+                bucket_start=row.bucket_start,
+                total=row.total,
+                healthy=row.healthy,
+                degraded=row.degraded,
+                down=row.down,
+                availability_percent=metrics_service.availability_percent(row.healthy, row.total),
+                avg_response_time_ms=f(row.avg_ms),
+                p95_response_time_ms=f(row.p95_ms),
+            )
+            for row in series.rows
+        ],
+    )

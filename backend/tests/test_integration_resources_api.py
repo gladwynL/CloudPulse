@@ -2,17 +2,14 @@
 
 import asyncio
 import uuid
-from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.api.deps import get_check_store, get_checker
+from app.api.deps import get_checker
 from app.core.config import Settings
-from app.db.session import get_db
-from app.main import create_app
 from app.models.resource import ResourceStatus
 from app.monitoring.store import SqlCheckStore
 from app.monitoring.types import CheckResult, ErrorCategory
@@ -27,25 +24,8 @@ Factory = sessionmaker[Session]
 
 
 @pytest.fixture
-def checker() -> FakeChecker:
-    return FakeChecker()
-
-
-@pytest.fixture
-def client(settings: Settings, session_factory: Factory, checker) -> Iterator[TestClient]:
-    app = create_app(settings)
-
-    def get_test_db() -> Iterator[Session]:
-        with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = get_test_db
-    app.dependency_overrides[get_check_store] = lambda: SqlCheckStore(
-        session_factory, owner="test-api", lease_grace_seconds=30
-    )
-    app.dependency_overrides[get_checker] = lambda: checker
-    with TestClient(app) as test_client:
-        yield test_client
+def client(pg_client: TestClient) -> TestClient:
+    return pg_client
 
 
 def create(client: TestClient, **overrides) -> dict:

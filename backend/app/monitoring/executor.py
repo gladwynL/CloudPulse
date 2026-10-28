@@ -67,10 +67,22 @@ async def execute_claimed_check(
                 error_category=ErrorCategory.INTERNAL,
                 duration_ms=(time.monotonic() - started) * 1000,
             )
-        stored = await store.complete(claim, result)
+        stored = await store.complete(claim, result, source)
     except asyncio.CancelledError:
         with contextlib.suppress(Exception):
             await store.release(claim)
+        raise
+    except Exception as exc:
+        # Nothing was committed (state and history roll back together); the lease expires
+        # and the resource is retried. The caller decides how to surface the failure.
+        logger.error(
+            "failed to persist check result",
+            extra={
+                "resource_id": str(claim.resource_id),
+                "check_source": source.value,
+                "error": type(exc).__name__,
+            },
+        )
         raise
 
     _log_outcome(claim, source, result, stored)

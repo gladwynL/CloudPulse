@@ -4,23 +4,17 @@ import enum
 import uuid
 from dataclasses import dataclass
 
+from app.models.enums import CheckSource, ErrorCategory
 from app.models.resource import ResourceStatus
 
-
-class CheckSource(enum.StrEnum):
-    SCHEDULED = "scheduled"
-    MANUAL = "manual"
-
-
-class ErrorCategory(enum.StrEnum):
-    TIMEOUT = "timeout"
-    DNS = "dns"
-    CONNECTION = "connection"
-    TLS = "tls"
-    BLOCKED = "blocked"
-    PROTOCOL = "protocol"
-    UNEXPECTED_STATUS = "unexpected_status"
-    INTERNAL = "internal"
+__all__ = [
+    "CheckResult",
+    "CheckSource",
+    "CheckTarget",
+    "ClaimOutcome",
+    "ClaimedCheck",
+    "ErrorCategory",
+]
 
 
 @dataclass(frozen=True, slots=True)

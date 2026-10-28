@@ -35,10 +35,11 @@ class ResourceNotFoundError(Exception):
 
 
 class ResourceValidationError(Exception):
-    def __init__(self, field: str, message: str) -> None:
+    def __init__(self, field: str, message: str, location: str = "body") -> None:
         super().__init__(message)
         self.field = field
         self.message = message
+        self.location = location
 
 
 class Page(NamedTuple):

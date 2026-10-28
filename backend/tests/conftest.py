@@ -20,10 +20,12 @@ from sqlalchemy import Engine, create_engine, make_url, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.api.deps import get_check_store, get_checker
 from app.core.config import Settings
 from app.db.session import get_db
 from app.main import create_app
 from app.models.resource import ResourceStatus
+from app.monitoring.store import SqlCheckStore
 from app.monitoring.types import CheckResult, CheckTarget
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
@@ -246,5 +248,32 @@ def run_alembic(engine: Engine, command_name: str, revision: str) -> None:
 @pytest.fixture
 def session_factory(pg_engine: Engine) -> sessionmaker[Session]:
     with pg_engine.begin() as connection:
-        connection.execute(text("TRUNCATE monitored_resources"))
+        connection.execute(text("TRUNCATE resource_check_results, monitored_resources"))
     return sessionmaker(pg_engine, autoflush=False, expire_on_commit=False)
+
+
+# --- API client wired to the test database ---------------------------------------------
+
+
+@pytest.fixture
+def checker() -> FakeChecker:
+    return FakeChecker()
+
+
+@pytest.fixture
+def pg_client(
+    settings: Settings, session_factory: sessionmaker[Session], checker: FakeChecker
+) -> Iterator[TestClient]:
+    app = create_app(settings)
+
+    def get_test_db() -> Iterator[Session]:
+        with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = get_test_db
+    app.dependency_overrides[get_check_store] = lambda: SqlCheckStore(
+        session_factory, owner="test-api", lease_grace_seconds=30
+    )
+    app.dependency_overrides[get_checker] = lambda: checker
+    with TestClient(app) as test_client:
+        yield test_client

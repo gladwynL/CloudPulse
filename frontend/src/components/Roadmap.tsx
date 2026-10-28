@@ -5,13 +5,17 @@ const PHASES = [
     title: 'Resource monitoring',
     summary: 'Register services; scheduled and manual HTTP checks; latest health via API.',
   },
-  { id: 2, title: 'Historical metrics', summary: 'Per-check history, uptime, and latency trends.' },
+  {
+    id: 2,
+    title: 'Metrics & history',
+    summary: 'Stored check history, availability and latency APIs, time series, retention.',
+  },
   { id: 3, title: 'Alerts & incidents', summary: 'Threshold rules and the incident lifecycle.' },
   { id: 4, title: 'Monitoring dashboard', summary: 'Resource management and status views.' },
   { id: 5, title: 'Cloud deployment', summary: 'Azure deployment and infrastructure-as-code.' },
 ] as const;
 
-const CURRENT_PHASE = 1;
+const CURRENT_PHASE = 2;
 
 export function Roadmap() {
   return (
@@ -27,6 +31,7 @@ export function Roadmap() {
       <ol className="roadmap">
         {PHASES.map((phase) => {
           const current = phase.id === CURRENT_PHASE;
+          const done = phase.id < CURRENT_PHASE;
           return (
             <li
               key={phase.id}
@@ -37,6 +42,7 @@ export function Roadmap() {
               <span className="roadmap__title">
                 {phase.title}
                 {current && <span className="roadmap__tag">Current</span>}
+                {done && <span className="roadmap__tag roadmap__tag--done">Done</span>}
               </span>
               <span className="roadmap__summary">{phase.summary}</span>
             </li>

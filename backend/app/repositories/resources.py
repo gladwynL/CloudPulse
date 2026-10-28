@@ -19,10 +19,12 @@ transaction.
 
 import uuid
 
-from sqlalchemy import Interval, func, literal_column, or_, select, update
+from sqlalchemy import Interval, func, insert, literal_column, or_, select, update
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
+from app.models.check_result import ResourceCheckResult
+from app.models.enums import CheckSource
 from app.models.resource import MonitoredResource as M
 from app.models.resource import ResourceStatus
 from app.monitoring.types import CheckResult, CheckTarget, ClaimedCheck, ClaimOutcome
@@ -146,8 +148,21 @@ def claim_by_id(
     return ClaimOutcome.BUSY if enabled else ClaimOutcome.DISABLED
 
 
-def complete(session: Session, claim: ClaimedCheck, result: CheckResult) -> bool:
-    """Store ``result`` and schedule the next check. False if the lease is no longer ours."""
+def complete(
+    session: Session, claim: ClaimedCheck, result: CheckResult, source: CheckSource
+) -> bool:
+    """Accept ``result``: update the latest state AND append a history row, atomically.
+
+    The lease-guarded UPDATE is the gate. It matches only while this executor still holds the
+    lease; if it matches nothing (resource deleted, disabled, reconfigured, lease expired or
+    already completed) we return False and write **no** history, so a discarded result can
+    never appear as a measurement and a repeated completion can never duplicate one.
+
+    Both writes happen in the caller's single transaction (this function never commits): if
+    the insert fails, the caller's rollback also undoes the state update and the lease stays
+    held until it expires. ``checked_at`` is the transaction timestamp, so it equals the
+    resource's ``last_checked_at`` for this check.
+    """
     stmt = (
         update(M)
         .where(M.id == claim.resource_id, M.lease_token == claim.lease_token)
@@ -156,9 +171,7 @@ def complete(session: Session, claim: ClaimedCheck, result: CheckResult) -> bool
             last_checked_at=func.now(),
             # Uses the row's *current* interval, so an interval edited mid-check applies.
             next_check_at=func.now() + M.check_interval_seconds * _ONE_SECOND,
-            last_response_time_ms=(
-                round(result.response_time_ms, 2) if result.response_time_ms is not None else None
-            ),
+            last_response_time_ms=_rounded(result.response_time_ms),
             last_http_status_code=result.http_status_code,
             last_error=result.error[:255] if result.error else None,
             lease_token=None,
@@ -167,7 +180,28 @@ def complete(session: Session, claim: ClaimedCheck, result: CheckResult) -> bool
         )
         .execution_options(synchronize_session=False)
     )
-    return session.execute(stmt).rowcount == 1
+    if session.execute(stmt).rowcount != 1:
+        return False
+
+    session.execute(
+        insert(ResourceCheckResult).values(
+            resource_id=claim.resource_id,
+            checked_at=func.now(),
+            status=result.status,
+            http_status_code=result.http_status_code,
+            response_time_ms=_rounded(result.response_time_ms),
+            duration_ms=_rounded(result.duration_ms),
+            error_category=result.error_category,
+            error_summary=result.error[:255] if result.error else None,
+            source=source,
+        )
+    )
+    return True
+
+
+def _rounded(value: float | None) -> float | None:
+    """Round once, here, to the column's two decimals so the database never re-rounds."""
+    return None if value is None else round(value, 2)
 
 
 def release(session: Session, claim: ClaimedCheck) -> None:

@@ -63,6 +63,17 @@ class Settings(BaseSettings):
     monitoring_shutdown_grace_seconds: float = Field(default=20.0, ge=0)
     monitoring_heartbeat_file: str = "/tmp/cloudpulse-worker-heartbeat"
 
+    # --- Metrics history ----------------------------------------------------------
+    # Worker: retention. API: query limits.
+    metrics_retention_days: int = Field(default=30, ge=1)
+    metrics_cleanup_interval_hours: float = Field(default=24.0, gt=0)
+    metrics_cleanup_batch_size: int = Field(default=1000, ge=1, le=100_000)
+    metrics_max_query_days: int = Field(default=30, ge=1)
+    metrics_default_window_hours: int = Field(default=24, ge=1)
+    metrics_max_timeseries_buckets: int = Field(default=1000, ge=1, le=10_000)
+    metrics_default_page_size: int = Field(default=50, ge=1)
+    metrics_max_page_size: int = Field(default=200, ge=1, le=1000)
+
     @field_validator("monitoring_allowed_local_hosts", mode="before")
     @classmethod
     def _split_allowed_local_hosts(cls, value: object) -> object:
@@ -84,6 +95,13 @@ class Settings(BaseSettings):
             raise ValueError("MONITORING_DEFAULT_TIMEOUT_SECONDS must be <= MAX_TIMEOUT_SECONDS")
         if self.monitoring_default_timeout_seconds > self.monitoring_default_interval_seconds:
             raise ValueError("MONITORING_DEFAULT_TIMEOUT_SECONDS must be <= default interval")
+        if self.metrics_default_page_size > self.metrics_max_page_size:
+            raise ValueError("METRICS_DEFAULT_PAGE_SIZE must be <= METRICS_MAX_PAGE_SIZE")
+        if self.metrics_max_query_days > self.metrics_retention_days:
+            # Queries wider than retention would silently describe data that no longer exists.
+            raise ValueError("METRICS_MAX_QUERY_DAYS must be <= METRICS_RETENTION_DAYS")
+        if self.metrics_default_window_hours > self.metrics_max_query_days * 24:
+            raise ValueError("METRICS_DEFAULT_WINDOW_HOURS must fit within METRICS_MAX_QUERY_DAYS")
         if self.monitoring_allowed_local_hosts and self.environment in {"staging", "production"}:
             # Fail closed: the SSRF relaxation can never be active in a deployed environment.
             raise ValueError(

@@ -122,7 +122,7 @@ jobs:
         run: docker compose --profile demo ps --all
 
       - name: End-to-end smoke test
-        run: python scripts/smoke_test.py
+        run: python scripts/smoke_test.py --restart-worker
 
       - name: Dump logs on failure
         if: failure()

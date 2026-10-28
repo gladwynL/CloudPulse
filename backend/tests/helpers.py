@@ -2,10 +2,13 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
-from sqlalchemy import func, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.models.check_result import ResourceCheckResult
+from app.models.enums import CheckSource, ErrorCategory
 from app.models.resource import MonitoredResource, ResourceStatus
 
 
@@ -75,3 +78,65 @@ def db_now(factory: sessionmaker[Session]) -> datetime:
 def seconds_from(now: datetime, moment: datetime | None) -> float:
     assert moment is not None
     return (moment.astimezone(UTC) - now.astimezone(UTC)).total_seconds()
+
+
+# --- history helpers ------------------------------------------------------------------------
+
+
+def insert_check(
+    factory: sessionmaker[Session],
+    resource_id: uuid.UUID,
+    checked_at: datetime,
+    *,
+    status: ResourceStatus = ResourceStatus.HEALTHY,
+    response_time_ms: float | None = None,
+    http_status_code: int | None = None,
+    duration_ms: float = 10.0,
+    source: CheckSource = CheckSource.SCHEDULED,
+    error_category: ErrorCategory | None = None,
+    error_summary: str | None = None,
+) -> uuid.UUID:
+    """Insert a history row with an explicit ``checked_at`` (deterministic fixtures)."""
+    row = ResourceCheckResult(
+        resource_id=resource_id,
+        checked_at=checked_at,
+        status=status,
+        http_status_code=http_status_code,
+        response_time_ms=None if response_time_ms is None else Decimal(str(response_time_ms)),
+        duration_ms=Decimal(str(duration_ms)),
+        error_category=error_category,
+        error_summary=error_summary,
+        source=source,
+    )
+    with factory() as session:
+        session.add(row)
+        session.commit()
+        return row.id
+
+
+def history(
+    factory: sessionmaker[Session], resource_id: uuid.UUID | None = None
+) -> list[ResourceCheckResult]:
+    stmt = select(ResourceCheckResult).order_by(
+        ResourceCheckResult.checked_at, ResourceCheckResult.id
+    )
+    if resource_id is not None:
+        stmt = stmt.where(ResourceCheckResult.resource_id == resource_id)
+    with factory() as session:
+        rows = list(session.execute(stmt).scalars())
+        for row in rows:
+            session.expunge(row)
+        return rows
+
+
+def count_checks(factory: sessionmaker[Session], resource_id: uuid.UUID | None = None) -> int:
+    return len(history(factory, resource_id))
+
+
+def make_due(factory: sessionmaker[Session], resource_id: uuid.UUID) -> None:
+    with factory() as session:
+        session.execute(
+            text("UPDATE monitored_resources SET next_check_at = now() WHERE id = :i"),
+            {"i": resource_id},
+        )
+        session.commit()

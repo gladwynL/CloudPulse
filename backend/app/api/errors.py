@@ -27,6 +27,10 @@ def register_error_handlers(app: FastAPI) -> None:
     async def invalid(_: Request, exc: ResourceValidationError) -> JSONResponse:
         # Same shape as FastAPI's request-validation errors so clients handle one format.
         return JSONResponse(
-            {"detail": [{"type": "value_error", "loc": ["body", exc.field], "msg": exc.message}]},
+            {
+                "detail": [
+                    {"type": "value_error", "loc": [exc.location, exc.field], "msg": exc.message}
+                ]
+            },
             422,
         )
