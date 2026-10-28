@@ -38,8 +38,8 @@ jobs:
     env:
       ENVIRONMENT: test
       # Throwaway credentials for the ephemeral CI service container only.
-      DATABASE_URL: postgresql+psycopg://cloudpulse:ci-only-password@localhost:5432/cloudpulse_ci
-      TEST_DATABASE_URL: postgresql+psycopg://cloudpulse:ci-only-password@localhost:5432/cloudpulse_ci
+      DATABASE_URL: postgresql+psycopg://cloudpulse:ci-only-password@127.0.0.1:5432/cloudpulse_ci
+      TEST_DATABASE_URL: postgresql+psycopg://cloudpulse:ci-only-password@127.0.0.1:5432/cloudpulse_ci
 
     steps:
       - uses: actions/checkout@v4
@@ -100,18 +100,34 @@ jobs:
         run: npm run build
 
   docker:
-    name: Docker images build
+    name: Docker stack (build, run, smoke test)
     runs-on: ubuntu-latest
     needs: [backend, frontend]
+    timeout-minutes: 15
+    env:
+      # Throwaway values for an ephemeral CI stack; nothing here is a real secret.
+      POSTGRES_PASSWORD: ci-only-password
+      MONITORING_ALLOWED_LOCAL_HOSTS: demo-target:8080
+      MONITORING_MIN_INTERVAL_SECONDS: "5"
     steps:
       - uses: actions/checkout@v4
 
       - name: Validate Compose file
-        run: docker compose config --quiet
-        env:
-          POSTGRES_PASSWORD: ci-only-password
+        run: docker compose --profile demo config --quiet
 
-      - name: Build images
-        run: docker compose build
-        env:
-          POSTGRES_PASSWORD: ci-only-password
+      - name: Build and start the stack (with demo target)
+        run: docker compose --profile demo up --build --detach --wait --wait-timeout 180
+
+      - name: Show service status
+        run: docker compose --profile demo ps --all
+
+      - name: End-to-end smoke test
+        run: python scripts/smoke_test.py
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose --profile demo logs --no-color --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile demo down --volumes

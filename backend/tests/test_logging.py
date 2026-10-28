@@ -37,3 +37,13 @@ def test_json_formatter_includes_extra_fields() -> None:
     assert payload["status_code"] == 200
     assert "args" not in payload
     assert "color_message" not in payload
+
+
+def test_http_client_request_logging_is_suppressed_to_avoid_leaking_urls() -> None:
+    from app.core.logging import configure_logging
+
+    configure_logging(level="INFO", fmt="json")
+
+    # httpx logs "HTTP Request: GET <full url>" at INFO; that must never be emitted.
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+    assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.WARNING

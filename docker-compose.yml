@@ -3,7 +3,13 @@
 #   cp .env.example .env      # then set POSTGRES_PASSWORD
 #   docker compose up --build
 #
-# Frontend: http://localhost:3000   API: http://localhost:8000   Postgres: localhost:5432
+# Frontend: http://localhost:3000   API: http://localhost:8000/docs   Postgres: localhost:5432
+#
+# All published ports bind to 127.0.0.1 only. The API has no authentication in this phase;
+# do not expose it to an untrusted network.
+#
+# Optional demo monitoring target (a local nginx the worker is allowed to reach):
+#   MONITORING_ALLOWED_LOCAL_HOSTS=demo-target:8080 docker compose --profile demo up --build
 
 name: cloudpulse
 
@@ -16,7 +22,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-cloudpulse}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -26,10 +32,11 @@ services:
       retries: 10
       start_period: 10s
 
-  # One-shot job that applies Alembic migrations before the API starts.
+  # One-shot job that applies Alembic migrations before the API and worker start.
+  # migrate, backend and worker all run the same image (built once, by `backend`).
   migrate:
-    build:
-      context: ./backend
+    image: cloudpulse-backend:local
+    pull_policy: never
     command: ["alembic", "upgrade", "head"]
     environment: &backend-env
       ENVIRONMENT: ${ENVIRONMENT:-local}
@@ -41,6 +48,16 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-cloudpulse}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      MONITORING_MIN_INTERVAL_SECONDS: ${MONITORING_MIN_INTERVAL_SECONDS:-10}
+      MONITORING_MAX_INTERVAL_SECONDS: ${MONITORING_MAX_INTERVAL_SECONDS:-86400}
+      MONITORING_DEFAULT_INTERVAL_SECONDS: ${MONITORING_DEFAULT_INTERVAL_SECONDS:-60}
+      MONITORING_DEFAULT_TIMEOUT_SECONDS: ${MONITORING_DEFAULT_TIMEOUT_SECONDS:-10}
+      MONITORING_MAX_TIMEOUT_SECONDS: ${MONITORING_MAX_TIMEOUT_SECONDS:-30}
+      MONITORING_LEASE_GRACE_SECONDS: ${MONITORING_LEASE_GRACE_SECONDS:-30}
+      MONITORING_ALLOWED_LOCAL_HOSTS: ${MONITORING_ALLOWED_LOCAL_HOSTS:-}
+      MONITORING_POLL_INTERVAL_SECONDS: ${MONITORING_POLL_INTERVAL_SECONDS:-2}
+      MONITORING_MAX_CONCURRENT_CHECKS: ${MONITORING_MAX_CONCURRENT_CHECKS:-10}
+      MONITORING_SHUTDOWN_GRACE_SECONDS: ${MONITORING_SHUTDOWN_GRACE_SECONDS:-20}
     depends_on:
       db:
         condition: service_healthy
@@ -49,10 +66,32 @@ services:
   backend:
     build:
       context: ./backend
+    image: cloudpulse-backend:local
     restart: unless-stopped
     environment: *backend-env
     ports:
-      - "${BACKEND_HOST_PORT:-8000}:8000"
+      - "127.0.0.1:${BACKEND_HOST_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Runs the polling scheduler. Exactly one worker is supported; the API never polls.
+  worker:
+    image: cloudpulse-backend:local
+    pull_policy: never
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    environment: *backend-env
+    # Longer than MONITORING_SHUTDOWN_GRACE_SECONDS so in-flight checks can finish on stop.
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker", "--healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       db:
         condition: service_healthy
@@ -67,10 +106,23 @@ services:
         VITE_APP_ENV: ${ENVIRONMENT:-local}
     restart: unless-stopped
     ports:
-      - "${FRONTEND_HOST_PORT:-3000}:8080"
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-3000}:8080"
     depends_on:
       backend:
         condition: service_healthy
+
+  # Demo-only target for trying out monitoring locally (profile "demo").
+  # GET /  -> 200 (healthy)    GET /missing -> 404 (degraded when 200 is expected)
+  # `docker compose stop demo-target` makes monitored URLs go DOWN.
+  demo-target:
+    profiles: ["demo"]
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 volumes:
   postgres-data:

@@ -12,7 +12,8 @@ from app.db.base import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep application loggers (and test log capture) intact when run programmatically.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Escape '%' so ConfigParser interpolation does not mangle URL-encoded passwords.
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
@@ -35,6 +36,14 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations against a live database connection."""
+    injected = config.attributes.get("connection")
+    if injected is not None:
+        # Programmatic use (tests): reuse the caller's connection instead of settings.
+        context.configure(connection=injected, target_metadata=target_metadata, compare_type=True)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

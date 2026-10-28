@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -34,7 +34,9 @@ class Settings(BaseSettings):
     )
 
     database_url_override: SecretStr | None = Field(default=None, alias="DATABASE_URL")
-    postgres_host: str = "localhost"
+    # 127.0.0.1 rather than "localhost": published ports bind IPv4 loopback only, and some
+    # hosts try IPv6 ::1 first and stall before falling back.
+    postgres_host: str = "127.0.0.1"
     postgres_port: int = 5432
     postgres_db: str = "cloudpulse"
     postgres_user: str = "cloudpulse"
@@ -43,6 +45,52 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_max_overflow: int = 10
     db_connect_timeout_seconds: int = 5
+
+    # --- Monitoring ---------------------------------------------------------------
+    # API + worker: bounds applied when resources are created/updated and checked.
+    monitoring_min_interval_seconds: int = Field(default=10, ge=1)
+    monitoring_max_interval_seconds: int = Field(default=86_400, ge=1)
+    monitoring_default_interval_seconds: int = Field(default=60, ge=1)
+    monitoring_default_timeout_seconds: int = Field(default=10, ge=1)
+    monitoring_max_timeout_seconds: int = Field(default=30, ge=1)
+    # Extra time beyond a check's timeout before its lease is considered abandoned.
+    monitoring_lease_grace_seconds: int = Field(default=30, ge=1)
+    # Hosts (or host:port) exempt from the private-address block. Development only.
+    monitoring_allowed_local_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    # Worker only.
+    monitoring_poll_interval_seconds: float = Field(default=2.0, gt=0)
+    monitoring_max_concurrent_checks: int = Field(default=10, ge=1, le=200)
+    monitoring_shutdown_grace_seconds: float = Field(default=20.0, ge=0)
+    monitoring_heartbeat_file: str = "/tmp/cloudpulse-worker-heartbeat"
+
+    @field_validator("monitoring_allowed_local_hosts", mode="before")
+    @classmethod
+    def _split_allowed_local_hosts(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [host.strip().lower() for host in value.split(",") if host.strip()]
+        return value
+
+    @model_validator(mode="after")
+    def _validate_monitoring_bounds(self) -> "Settings":
+        if self.monitoring_min_interval_seconds > self.monitoring_max_interval_seconds:
+            raise ValueError("MONITORING_MIN_INTERVAL_SECONDS must be <= MAX_INTERVAL_SECONDS")
+        if not (
+            self.monitoring_min_interval_seconds
+            <= self.monitoring_default_interval_seconds
+            <= self.monitoring_max_interval_seconds
+        ):
+            raise ValueError("MONITORING_DEFAULT_INTERVAL_SECONDS must be within min/max interval")
+        if self.monitoring_default_timeout_seconds > self.monitoring_max_timeout_seconds:
+            raise ValueError("MONITORING_DEFAULT_TIMEOUT_SECONDS must be <= MAX_TIMEOUT_SECONDS")
+        if self.monitoring_default_timeout_seconds > self.monitoring_default_interval_seconds:
+            raise ValueError("MONITORING_DEFAULT_TIMEOUT_SECONDS must be <= default interval")
+        if self.monitoring_allowed_local_hosts and self.environment in {"staging", "production"}:
+            # Fail closed: the SSRF relaxation can never be active in a deployed environment.
+            raise ValueError(
+                "MONITORING_ALLOWED_LOCAL_HOSTS is a development-only setting and is not "
+                f"permitted when ENVIRONMENT={self.environment}"
+            )
+        return self
 
     @field_validator("cors_origins", mode="before")
     @classmethod

@@ -81,6 +81,10 @@ def configure_logging(
                 "uvicorn": {"level": level, "handlers": [], "propagate": True},
                 "uvicorn.error": {"level": level, "handlers": [], "propagate": True},
                 "uvicorn.access": {"level": "WARNING", "handlers": [], "propagate": True},
+                # The HTTP client logs every request URL (including query strings, which may
+                # carry tokens) at INFO. Monitoring logs host-only fields instead.
+                "httpx": {"level": "WARNING", "handlers": [], "propagate": True},
+                "httpcore": {"level": "WARNING", "handlers": [], "propagate": True},
             },
         }
     )

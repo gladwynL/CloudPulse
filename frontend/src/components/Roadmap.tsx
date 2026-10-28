@@ -1,13 +1,17 @@
 const PHASES = [
   { id: 0, title: 'Foundation', summary: 'API, database, Docker, CI, and dashboard shell.' },
-  { id: 1, title: 'Monitored resources', summary: 'Register services and endpoints to watch.' },
-  { id: 2, title: 'Health checks', summary: 'Scheduled HTTP checks with latency capture.' },
-  { id: 3, title: 'Metrics & uptime', summary: 'Historical status, uptime, and latency trends.' },
-  { id: 4, title: 'Alerts & incidents', summary: 'Threshold rules, incident lifecycle.' },
+  {
+    id: 1,
+    title: 'Resource monitoring',
+    summary: 'Register services; scheduled and manual HTTP checks; latest health via API.',
+  },
+  { id: 2, title: 'Historical metrics', summary: 'Per-check history, uptime, and latency trends.' },
+  { id: 3, title: 'Alerts & incidents', summary: 'Threshold rules and the incident lifecycle.' },
+  { id: 4, title: 'Monitoring dashboard', summary: 'Resource management and status views.' },
   { id: 5, title: 'Cloud deployment', summary: 'Azure deployment and infrastructure-as-code.' },
 ] as const;
 
-const CURRENT_PHASE = 0;
+const CURRENT_PHASE = 1;
 
 export function Roadmap() {
   return (

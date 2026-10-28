@@ -1,9 +1,10 @@
 """ORM models.
 
 Import every model module here so ``Base.metadata`` is fully populated for Alembic
-autogenerate. No domain models exist yet (Phase 0).
+autogenerate.
 """
 
 from app.db.base import Base
+from app.models.resource import MonitoredResource, ResourceStatus
 
-__all__ = ["Base"]
+__all__ = ["Base", "MonitoredResource", "ResourceStatus"]

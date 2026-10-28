@@ -7,10 +7,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.errors import register_error_handlers
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.core.middleware import register_request_logging
+from app.monitoring.checker import HttpChecker
+from app.monitoring.security import TargetPolicy
 
 logger = logging.getLogger("cloudpulse")
 
@@ -25,12 +28,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info(
             "application startup",
             extra={"version": settings.app_version, "environment": settings.environment},
         )
+        # Outbound client for manual checks. Scheduled checks run in the worker process.
+        app.state.checker = HttpChecker(
+            app.state.policy, max_connections=settings.monitoring_max_concurrent_checks
+        )
         yield
+        await app.state.checker.aclose()
         logger.info("application shutdown")
 
     app = FastAPI(
@@ -38,6 +46,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version=settings.app_version,
         lifespan=lifespan,
     )
+
+    app.state.settings = settings
+    app.state.policy = TargetPolicy(frozenset(settings.monitoring_allowed_local_hosts))
 
     app.add_middleware(
         CORSMiddleware,
@@ -48,6 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         expose_headers=["X-Request-ID"],
     )
     register_request_logging(app)
+    register_error_handlers(app)
     app.include_router(api_router)
     return app
 
