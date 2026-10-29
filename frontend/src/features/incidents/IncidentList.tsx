@@ -47,8 +47,9 @@ export function IncidentCompactList({ items }: { items: Incident[] }) {
 
 export function IncidentsTable({ items }: { items: Incident[] }) {
   return (
-    <div className="table-wrap table-wrap--stack">
+    <div className="table-wrap table-wrap--stack" role="region" aria-label="Incidents" tabIndex={0}>
       <table className="table table--stack">
+        <caption className="sr-only">Incidents</caption>
         <thead>
           <tr>
             <th scope="col">Incident</th>

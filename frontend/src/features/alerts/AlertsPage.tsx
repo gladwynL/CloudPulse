@@ -279,7 +279,12 @@ export function AlertsPage() {
         )
       ) : (
         <>
-          <div className="table-wrap table-wrap--stack">
+          <div
+            className="table-wrap table-wrap--stack"
+            role="region"
+            aria-label="Alert rules"
+            tabIndex={0}
+          >
             <table className="table table--stack">
               <caption className="sr-only">Alert rules</caption>
               <thead>

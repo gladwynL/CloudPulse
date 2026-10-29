@@ -1415,7 +1415,7 @@ to a host other than the dashboard and the API.
 
 The tests create and delete only resources they name `e2e-…`, and never stop the shared demo
 container: "breaking" the service means changing that resource's own URL to a path that answers 404.
-Set `E2E_SCREENSHOTS=1` to refresh `docs/screenshots/`.
+Set `E2E_SCREENSHOTS=1` to refresh `docs/screenshots/`. Set `E2E_FONT_STRESS=1` to run the specs with a wide font: CI's Linux runners fall back to wider fonts than a Windows or macOS laptop, and this reproduces layout and keyboard-access failures that otherwise only appear in CI.
 
 ## Health and readiness endpoints
 

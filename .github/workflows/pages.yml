@@ -36,7 +36,7 @@ concurrency:
 jobs:
   build:
     name: Build and validate the showcase
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
@@ -62,7 +62,7 @@ jobs:
     # Only after the owner has enabled Pages (see the header) and only from main.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PAGES_ENABLED == 'true'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       pages: write

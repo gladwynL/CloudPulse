@@ -198,7 +198,8 @@
 
 .grid-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  /* rem, not px: the minimum column width must grow with the user's text size (WCAG reflow). */
+  grid-template-columns: repeat(auto-fit, minmax(min(9.5rem, 100%), 1fr));
   gap: var(--space-3);
 }
 
@@ -210,9 +211,13 @@
 
 .grid-main-side {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  /* rem, not px: the side column must grow with the user's text size. */
+  grid-template-columns: minmax(0, 2fr) minmax(min(17.5rem, 100%), 1fr);
   gap: var(--space-4);
   align-items: start;
+}
+.grid-main-side > * {
+  min-width: 0;
 }
 
 .stack {

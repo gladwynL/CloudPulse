@@ -127,7 +127,12 @@ function ServiceList({ resources, total }: { resources: Resource[]; total: numbe
   );
   return (
     <div className="stack">
-      <div className="table-wrap">
+      <div
+        className="table-wrap"
+        role="region"
+        aria-label="Monitored services, most severe first"
+        tabIndex={0}
+      >
         <table className="table">
           <caption className="sr-only">Monitored services, most severe first</caption>
           <thead>

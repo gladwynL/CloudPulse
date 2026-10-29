@@ -57,7 +57,12 @@ export function HistoryTable({ resourceId, period }: { resourceId: string; perio
         </EmptyState>
       ) : (
         <>
-          <div className="table-wrap table-wrap--stack-sm">
+          <div
+            className="table-wrap table-wrap--stack-sm"
+            role="region"
+            aria-label="Check history, newest first"
+            tabIndex={0}
+          >
             <table className="table table--stack-sm">
               <caption className="sr-only">Check history, newest first</caption>
               <thead>

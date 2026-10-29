@@ -178,14 +178,26 @@ test.describe('accessibility (axe-core, WCAG 2.1 A/AA)', () => {
   test('the page is usable at 200% text size without losing content or scrolling sideways', async ({
     page,
   }) => {
-    await page.goto('/');
-    await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
-    await page.waitForLoadState('networkidle');
-    const { scrollWidth, clientWidth } = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      clientWidth: document.documentElement.clientWidth,
-    }));
-    expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
-    await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
+    for (const route of ['/', '/resources', '/alerts', `/incidents/${incidentId}`]) {
+      await page.goto(route);
+      await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
+      await page.waitForLoadState('networkidle');
+      const { scrollWidth, clientWidth, offenders } = await page.evaluate(() => {
+        const width = document.documentElement.clientWidth;
+        return {
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: width,
+          offenders: [...document.querySelectorAll('body *')]
+            .filter((el) => el.getBoundingClientRect().right > width + 0.5)
+            .slice(0, 5)
+            .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 40)}`),
+        };
+      });
+      expect(
+        scrollWidth,
+        `${route} overflows at 200% text: ${offenders.join(', ')}`,
+      ).toBeLessThanOrEqual(clientWidth);
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    }
   });
 });

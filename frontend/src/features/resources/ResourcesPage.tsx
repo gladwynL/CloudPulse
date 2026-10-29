@@ -305,7 +305,12 @@ export function ResourcesPage() {
               title="Showing the last loaded data"
             />
           )}
-          <div className="table-wrap table-wrap--stack">
+          <div
+            className="table-wrap table-wrap--stack"
+            role="region"
+            aria-label="Monitored resources"
+            tabIndex={0}
+          >
             <table className="table table--stack">
               <caption className="sr-only">Monitored resources</caption>
               <thead>

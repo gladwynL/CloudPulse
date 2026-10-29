@@ -32,6 +32,18 @@ export const test = base.extend<Options & { audit: void }>({
   auditConsole: [true, { option: true }],
   audit: [
     async ({ page, auditConsole }, use) => {
+      // Opt-in robustness check: `E2E_FONT_STRESS=1` swaps in a wide font. CI runs on Linux, whose
+      // fallback fonts are wider than a developer's Windows or macOS ones, and that difference once
+      // hid overflow and keyboard-access bugs locally. This reproduces it without a Linux machine.
+      if (process.env.E2E_FONT_STRESS) {
+        await page.addInitScript(() => {
+          document.addEventListener('DOMContentLoaded', () => {
+            const style = document.createElement('style');
+            style.textContent = '* { font-family: Verdana, "DejaVu Sans", sans-serif !important; }';
+            document.head.appendChild(style);
+          });
+        });
+      }
       const consoleErrors: string[] = [];
       const pageErrors: string[] = [];
       const external: string[] = [];

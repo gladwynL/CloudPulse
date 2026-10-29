@@ -170,6 +170,7 @@
   --tone: var(--text);
   display: grid;
   gap: var(--space-1);
+  min-width: 0;
   padding: var(--space-3) var(--space-4);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -186,6 +187,7 @@ a.stat:hover {
 
 .stat__label {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   color: var(--text-muted);
@@ -197,6 +199,7 @@ a.stat:hover {
 }
 
 .stat__value {
+  overflow-wrap: anywhere;
   font-size: 1.75rem;
   font-weight: 650;
   letter-spacing: -0.02em;
@@ -820,11 +823,13 @@ a.stat:hover {
 
 .timeline__title {
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .timeline__meta {
   font-size: 0.8125rem;
   color: var(--text-subtle);
+  overflow-wrap: anywhere;
 }
 
 /* ---------- Dialog ---------- */

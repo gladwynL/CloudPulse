@@ -17,6 +17,10 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
     restoreMocks: true,
+    // The first import of the chart library is slow when the whole suite runs in parallel (cold
+    // module transforms), so tests get generous budgets. A genuinely broken test still fails; it
+    // just does not fail because a CI machine was busy.
+    testTimeout: 30_000,
     // Deterministic tests: a fixed API origin and no background polling.
     env: {
       VITE_API_URL: 'http://api.test',
