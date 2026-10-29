@@ -6,16 +6,19 @@
 production-style engineering project: health checks, uptime and latency tracking,
 alerting, and incident management for cloud services, with a React dashboard on top.
 
-> **Current status: Phase 4 — Monitoring dashboard.**
-> You can register HTTP services, have a worker check them on a schedule, keep a durable history,
-> define alert rules, and have incidents opened, acknowledged and resolved. **A React dashboard now
-> covers all of it against the real API: an overview, resource management, per-resource charts and
-> check history, alert-rule management, and incident triage with timelines.** It runs in Docker next
-> to the API and is tested in a real browser against the full stack.
+> **Current status: Phase 5 — Zero-cost deployment and infrastructure readiness.**
+> CloudPulse monitors HTTP services on a schedule, keeps their history, evaluates alert rules and
+> manages incidents, with a React dashboard on top (Phases 1 to 4). Phase 5 makes it **repeatable and
+> safe to run**: a hardened production-style local stack where only the web entry point is published,
+> tested database backup, verification and restore, verified startup and worker-outage behaviour,
+> stronger CI, and a **static public showcase** page for GitHub Pages.
 >
-> **Not implemented yet:** notifications of any kind (email, chat, webhooks, paging),
-> authentication (the dashboard and API are local-only, see
-> [Security and deployment limitations](#security-and-deployment-limitations)), and cloud
+> **The monitoring backend runs locally and is not publicly hosted.** It has no authentication, so
+> exposing it would be unsafe. The public page is a static showcase, not a live deployment. Nothing
+> in this project uses a paid service or a cloud account; a cloud deployment is documented as a future
+> design only. See [Deployment](#deployment-local-production-style).
+>
+> **Not implemented:** notifications (email, chat, webhooks, paging), authentication, and any cloud
 > deployment. See the [roadmap](#roadmap).
 
 ---
@@ -33,6 +36,10 @@ alerting, and incident management for cloud services, with a React dashboard on 
 - [History and metrics](#history-and-metrics)
 - [Alerts and incidents](#alerts-and-incidents)
 - [Dashboard](#dashboard)
+- [Deployment](#deployment-local-production-style)
+- [Backup and recovery](#backup-and-recovery)
+- [Public showcase](#public-showcase-github-pages)
+- [Cloud reference architecture](#cloud-reference-architecture-design-only)
 - [Scheduling and worker design](#scheduling-and-worker-design)
 - [Network safety (SSRF)](#network-safety-ssrf)
 - [Security and deployment limitations](#security-and-deployment-limitations)
@@ -55,7 +62,7 @@ CloudPulse is project #3 in a software-engineering portfolio:
 
 It focuses on cloud/backend engineering: observability, monitoring architecture,
 PostgreSQL, Docker, CI/CD, production API design, configuration management, and
-Azure-oriented deployment.
+deployment engineering (a zero-cost local deployment, with a cloud design documented but not provisioned).
 
 ## Capabilities
 
@@ -78,8 +85,12 @@ Azure-oriented deployment.
 | Incident lifecycle (open, acknowledge, auto-resolve) with event timeline | ✅ Phase 3 |
 | Notifications (email, chat, webhooks, paging), escalation | Not planned yet |
 | React dashboard: overview, resources, charts, history, rules, incidents | ✅ Phase 4 |
+| Hardened production-style local stack (single published port, read-only containers) | ✅ Phase 5 |
+| Database backup, isolated verification and safe restore | ✅ Phase 5 |
+| Static public showcase (GitHub Pages workflow, validated build) | ✅ Phase 5 (goes live when Pages is enabled) |
+| Cloud reference architecture | 📄 Design document only (nothing provisioned) |
 | Browser end-to-end tests against the Docker stack | ✅ Phase 4 |
-| Azure deployment, infrastructure-as-code | Planned (Phase 5) |
+| Cloud deployment (Azure or another provider), infrastructure-as-code | Not done: needs authentication and a budget decision first |
 
 ## Architecture
 
@@ -150,11 +161,13 @@ CloudPulse/
 │   ├── tests/              # unit tests + PostgreSQL integration tests
 │   ├── pyproject.toml, requirements*.txt, Dockerfile
 ├── frontend/               # React dashboard (src/app, features/, components/, lib/), e2e/ (Playwright)
-├── scripts/smoke_test.py   # end-to-end test against a running stack (stdlib only)
-├── infra/                  # placeholder for Phase 5 cloud infrastructure
-├── docs/architecture.md, docs/screenshots/
-├── .github/workflows/ci.yml
-├── docker-compose.yml
+├── site/                   # the static GitHub Pages showcase (HTML + CSS, no scripts)
+├── scripts/                # smoke_test.py, db_backup.py, init_env.py, check_ports.py, build_site.py (stdlib only)
+├── infra/                  # notes only: no cloud infrastructure exists or is planned to be created here
+├── docs/                   # architecture.md, cloud-reference-architecture.md, screenshots/
+├── .github/workflows/      # ci.yml (backend, frontend, docker, hardened), pages.yml (showcase)
+├── docker-compose.yml      # development stack
+├── docker-compose.hardened.yml   # production-style local override
 ├── .env.example
 └── README.md
 ```
@@ -175,10 +188,12 @@ Only Git and Docker are required to run the stack.
 ```bash
 git clone https://github.com/gladwynL/CloudPulse.git
 cd CloudPulse
-cp .env.example .env          # Windows PowerShell: Copy-Item .env.example .env
-# edit .env and set POSTGRES_PASSWORD
+python scripts/init_env.py    # creates .env with a generated database password (never overwrites)
 docker compose up --build
 ```
+
+(Prefer to do it by hand? `cp .env.example .env` — PowerShell: `Copy-Item .env.example .env` — then set
+`POSTGRES_PASSWORD`; the file explains how to generate one.)
 
 | Service    | URL                                        |
 | ---------- | ------------------------------------------ |
@@ -197,6 +212,20 @@ docker compose logs -f backend      # follow API logs
 docker compose run --rm migrate     # re-run migrations
 docker compose down                 # stop (data is kept)
 docker compose down -v              # stop and DELETE the local database volume
+```
+
+For the hardened production-style profile, backups and the CI-identical checks, see
+[Deployment](#deployment-local-production-style) and [Backup and recovery](#backup-and-recovery).
+Quick reference:
+
+```bash
+python scripts/init_env.py                                   # first-time .env
+docker compose up --build --detach --wait                    # start (add -f docker-compose.hardened.yml for hardened)
+docker compose ps && curl http://localhost:8000/health       # health (hardened: http://localhost:3000/health)
+python scripts/smoke_test.py --docker-control                # full-loop check (needs the demo target, below)
+python scripts/db_backup.py backup                           # back up the database
+python scripts/db_backup.py verify backups/<file>.dump       # prove the backup restores (disposable container)
+docker compose stop                                          # stop without deleting data
 ```
 
 ### Try it with the demo target
@@ -849,8 +878,12 @@ start** with it set when `ENVIRONMENT` is `staging` or `production`.
 
 - **There is no authentication yet.** Anyone who can reach the API can create, change,
   delete, and trigger checks on resources. **Do not expose the API to an untrusted or public
-  network.** Compose publishes ports on `127.0.0.1` only; keep it that way until an
-  authentication phase exists.
+  network.** Compose publishes ports on `127.0.0.1` only (the hardened profile publishes just the
+  frontend); keep it that way until an authentication phase exists. Binding to loopback limits who can
+  reach the app, it is **not** authentication, and it does not protect against other software or users
+  on the same machine. Authentication and authorization are prerequisites for any future public
+  backend, and the [cloud reference architecture](docs/cloud-reference-architecture.md) lists them first.
+- Never use a public tunnel, port forward or reverse proxy to reach the local stack from the internet.
 - The SSRF policy is defense in depth for a local portfolio system, not a substitute for network
   egress controls (run the worker in a network that cannot reach sensitive internal systems).
 - One worker; no HA or distributed scheduling.
@@ -863,15 +896,267 @@ start** with it set when `ENVIRONMENT` is `staging` or `production`.
 - **The dashboard is as unauthenticated as the API.** It stores nothing in the browser (no tokens or
   credentials, no persisted state), but anyone who can open it can change or delete resources and
   rules. It is for local use on a trusted machine; ports stay bound to `127.0.0.1`.
+- **Deployment scope.** Only the static showcase is meant to be public; the monitoring backend is not
+  hosted anywhere. Dependencies were checked with `pip-audit` and `npm audit` (no known
+  vulnerabilities at the time of writing); both run in CI. Container images are pinned by tag, not by
+  digest, and are not scanned by a dedicated image scanner (none is used, to keep the project free of paid
+  tools). A monitored URL's query string is hidden in the dashboard and never logged by CloudPulse, but
+  the monitored service naturally sees (and may log) its own URL.
 - **No notifications.** Alerts produce incidents you read in the dashboard or through the API; nothing emails, pages or
   calls a webhook. Incident management (acknowledge, rule edits) is as unauthenticated as the rest of
   the API: `MANUAL` in an incident timeline means "an API caller", not a verified person.
 
+## Deployment (local, production-style)
+
+CloudPulse is **local-first by design**. The complete system (dashboard, API, worker, PostgreSQL)
+runs on one machine with Docker Compose, and there is deliberately no public cloud deployment: the
+application has no authentication, so putting it on the internet would be unsafe, and a paid cloud
+service is out of scope for this project. What *is* public is a [static showcase](#public-showcase-github-pages)
+of the project. See [what is and is not deployed](#what-is-and-is-not-deployed) at the end of this
+section.
+
+### Two ways to run the same stack
+
+| | Development (`docker-compose.yml`) | Hardened (`+ docker-compose.hardened.yml`) |
+| --- | --- | --- |
+| Published ports | frontend `3000`, API `8000`, PostgreSQL `5432`, all on `127.0.0.1` | **frontend `3000` only**, on `127.0.0.1` |
+| How the browser reaches the API | directly, `http://localhost:8000` (CORS) | through nginx on the same origin (`/api`, `/health`, `/ready`); no CORS |
+| API docs (`/docs`) | on | off |
+| Containers | normal | read-only root filesystem, all capabilities dropped (PostgreSQL keeps the five its entrypoint needs), `no-new-privileges`, memory and process limits |
+| Used by | day-to-day work, the first CI job, the existing smoke test | production-style local runs, the second CI job |
+
+Both use the same images, the same database volume and the same migrations, so you can switch
+between them without losing data (tested; the frontend is rebuilt because its API origin is fixed at
+build time).
+
+```bash
+# First time: create .env with a generated database password (never overwrites an existing .env)
+python scripts/init_env.py
+
+# Development stack
+docker compose up --build --detach --wait
+
+# Hardened stack (the one to leave running)
+docker compose -f docker-compose.yml -f docker-compose.hardened.yml up --build --detach --wait
+```
+
+PowerShell is identical; to include the demo target set the variable first:
+`$env:MONITORING_ALLOWED_LOCAL_HOSTS="demo-target:8080"; docker compose --profile demo up --build --detach --wait`.
+On Linux/macOS/Git Bash you can set `COMPOSE_FILE=docker-compose.yml:docker-compose.hardened.yml`
+once instead of repeating `-f` (on Windows PowerShell use `;` and set `COMPOSE_PATH_SEPARATOR=;`).
+
+```bash
+docker compose ps                         # status and health of every service
+curl http://localhost:3000/health         # liveness through nginx: {"status":"ok"}
+curl http://localhost:3000/ready          # readiness incl. the database (hardened); dev: :8000/ready
+python scripts/check_ports.py --only frontend   # audit: only the frontend publishes, on loopback
+docker compose stop                       # stop without deleting data
+docker compose start                      # start again; the data is still there
+docker compose down                       # remove containers, KEEP the database volume
+# docker compose down -v                  # also DELETES the database volume. Not for routine use.
+```
+
+### What survives what
+
+The database lives in the named volume `cloudpulse_postgres-data`. It survives container restarts,
+`docker compose down`, worker and backend restarts, Docker Desktop restarts and reboots, because
+Docker keeps named volumes until you remove them (`down -v` or `docker volume rm`). Scheduled checks
+resume by themselves after a restart, alert counters and incident states are stored in the database,
+and an in-flight check's lease simply expires and is retried. None of this was changed in this phase;
+the scenarios below were re-verified end to end.
+
+### Startup and failure behaviour (verified)
+
+Startup order is enforced by health checks: `db` healthy, then `migrate` (a one-shot job) must
+**complete successfully**, then `backend` and `worker` start, then `frontend`.
+
+| Scenario | Result |
+| --- | --- |
+| Fresh empty volume | migrations create the schema; all services healthy in about 22 s once images are built |
+| Existing database | `migrate` runs again and does nothing (no destructive operation is ever run at start) |
+| Migration cannot connect or fails | `migrate` exits non-zero with the error, and `backend`/`worker` never start |
+| Restart of `db` or `backend` | data and history intact; the API answers `/ready` 503 only while the database is down |
+| Database stopped under a running worker | poll failures are logged with **exponential backoff capped near 30 s**; after about a minute with no successful poll the worker's health check turns `unhealthy`; when the database returns, the worker recovers by itself and checks resume. No busy loop |
+| Worker restarted | checks resume, in-flight leases expire and are retried, alert counters and incidents persist (covered by the smoke test) |
+
+### Container hygiene
+
+- The backend image runs as an unprivileged `app` user; the frontend and demo target use
+  `nginx-unprivileged` (uid 101); PostgreSQL uses the official image's own user. Nothing runs
+  privileged.
+- No secret is in any image: the database password exists only in `.env` (git-ignored) and in the
+  running containers' environment; build arguments are the non-secret `VITE_*` values. A check of the
+  running stack found the password in no log, no image layer and no frontend asset.
+- Docker's JSON logs are rotated (10 MB × 3 per service) so a long-running stack cannot fill a disk.
+- Dependencies are pinned (`requirements.txt`, `package-lock.json`, image tags).
+- nginx sends a restrictive Content-Security-Policy (scripts from the page's own origin only),
+  `X-Frame-Options: DENY`, `nosniff`, a referrer policy, and forwards only `/api/`, `/health` and
+  `/ready` to the backend; the API's `/docs` and `/openapi.json` answer 404 through it.
+- With `ENVIRONMENT=staging` or `production` the API refuses to start with a short or placeholder
+  database password, or with the private-address allowlist set.
+
+### Measured footprint
+
+Measured on the development laptop (Windows 11, Docker Desktop) with the hardened stack running one
+resource at a 5-second interval. These are measurements, not promises.
+
+| Item | Measurement |
+| --- | --- |
+| Memory at idle | frontend 11 MiB, API 71 MiB, worker 58 MiB, PostgreSQL 42 MiB, demo target 11 MiB: about **190 MiB** in total |
+| Startup to all-healthy | about 22 s (images built, fresh volume), about 80 s including a cold image build |
+| Image sizes | backend 308 MB, frontend 83 MB (PostgreSQL 424 MB and the demo target 82 MB are upstream images) |
+| Latency through nginx to the API | `/health` p50 6 ms; `/api/v1/overview` p50 13 ms, p95 16 ms; `/api/v1/resources` p50 11 ms (40 sequential requests) |
+| Frontend | 829 KB on disk; first load is one 317 KB script (100 KB gzipped); the chart library (114 KB gzipped) loads only with the resource page |
+
+### What is and is not deployed
+
+| | Status |
+| --- | --- |
+| The complete application on the developer's machine, with Docker Compose | **Implemented and verified** |
+| Hardened local profile, backup and restore tooling, startup and recovery behaviour | **Implemented and verified** |
+| A public static showcase on GitHub Pages | **Workflow implemented and tested locally; goes live when the owner enables Pages** (see below) |
+| A public or cloud-hosted backend (API, worker, database) | **Not implemented, on purpose** |
+| Cloud reference architecture | **Designed and documented only**: [`docs/cloud-reference-architecture.md`](docs/cloud-reference-architecture.md) |
+
+No cloud account, subscription, payment method, domain, tunnel or paid service is used or needed
+by anything in this repository. CI uses the free standard GitHub-hosted runners of a public
+repository.
+
+## Backup and recovery
+
+[`scripts/db_backup.py`](scripts/db_backup.py) (Python standard library only, works the same on
+Windows, macOS and Linux) backs up the running PostgreSQL database, verifies a backup without
+touching live data, and restores into a new database.
+
+```bash
+python scripts/db_backup.py backup                           # -> backups/cloudpulse-cloudpulse-<UTC time>.dump (+ .sha256)
+python scripts/db_backup.py verify backups/<file>.dump       # restore into a throw-away container and check it
+python scripts/db_backup.py restore backups/<file>.dump --database cloudpulse_recovered
+```
+
+It uses whichever stack Compose is pointed at (development or hardened) and needs the `db`
+service to be running.
+
+### What it guarantees
+
+- **No password handling.** `pg_dump`, `pg_restore` and `psql` run inside the `db` container over its
+  local socket; no credential is passed, printed or logged.
+- **Never overwrites.** A backup goes to a new, timestamped file; a name clash is an error. A failed
+  or empty dump leaves no file behind, and a dump is only reported as good after `pg_restore --list`
+  can read it. Each backup gets a `.sha256` sidecar (checked again before verify and restore), and
+  owner-only permissions where the OS supports them.
+- **Stays out of git.** `backups/`, `*.dump` and `*.sha256` are git-ignored and excluded from the
+  Docker build context. The `backups/` folder is created with owner-only permissions.
+- **Meaningful exit codes**: 0 success, 1 failure, 2 refused for safety or bad usage, 3 the backup
+  restores but does not look like a CloudPulse database.
+- **`verify` is safe by construction**: it starts a disposable PostgreSQL container with no volume and
+  no published port, restores into it, checks that every expected table exists, the schema version is
+  recorded, and prints row counts, then removes the container. The live database is not touched.
+- **`restore` cannot overwrite data.** It refuses a database that already contains tables, refuses the
+  live database's name unless you pass `--allow-live-database-name` (and even then only if it is
+  empty), and accepts only simple lowercase database names.
+
+### Recovering from a lost volume or machine
+
+1. Start a fresh stack's database only: `docker compose up --detach --wait db`
+   (create `.env` first with `python scripts/init_env.py` if you lost it).
+2. Restore into its still-empty database:
+   `python scripts/db_backup.py restore backups/<file>.dump --database cloudpulse --allow-live-database-name`
+3. Start everything: `docker compose up --detach --wait` (the migration step finds the schema in
+   place and changes nothing).
+4. Confirm in the dashboard, then take a new backup.
+
+Restoring into a *different* name (`--database cloudpulse_recovered`) lets you inspect a backup next to
+the live data with `docker compose exec db psql -U cloudpulse -d cloudpulse_recovered`.
+
+### Practicalities
+
+- A backup contains the monitoring URLs you registered (possibly with query strings) and incident
+  history. Treat it as sensitive: keep it off cloud-synced folders and out of git.
+- Backups are a manual command, not an automatic job: there is no scheduler and no paid backup
+  service. To automate it, run the command from Windows Task Scheduler or cron.
+- A backup is a point-in-time `pg_dump` (transactionally consistent); it does not include `.env` or
+  Docker volumes. Keep `.env`'s database name and user unchanged when restoring on a new machine.
+- The restore path is exercised in CI: the hardened job takes a backup of the running stack and
+  verifies it in a disposable database.
+
+## Public showcase (GitHub Pages)
+
+[`site/`](site/) is a small static page (plain HTML and CSS, no JavaScript, no analytics) presenting
+the project: what it does, real screenshots of the dashboard, the architecture, how an alert becomes an
+incident, the testing and CI story, and how to run it. It is a **showcase**: it contains no live data
+and calls no API, and it says so on the page. GitHub Pages cannot host the FastAPI backend,
+PostgreSQL or the worker, and nothing here pretends otherwise.
+
+What is published is exactly `site/` plus the screenshots in `docs/screenshots/`, assembled by
+[`scripts/build_site.py`](scripts/build_site.py), which also **validates** the result and fails the
+build on a broken link or image, a script, an external reference (other than this project's GitHub
+URLs), an absolute path that would break under `/CloudPulse/`, a secret-looking string or private
+address, an unexpected file type, an oversized image, or a missing "static showcase" notice. The page
+carries a Content-Security-Policy that allows no scripts and no network connections.
+
+```bash
+python scripts/build_site.py              # builds and validates ./_site
+cd frontend && npx playwright test e2e/site.spec.ts   # serves it under /CloudPulse/ and checks it in a browser
+```
+
+The Playwright spec serves the build under the same `/CloudPulse/` subpath GitHub Pages uses and checks
+that every image decodes, nothing is requested from outside the site, there are no console errors,
+navigation works, and nothing overflows at phone, tablet and desktop widths.
+
+To refresh the screenshots from the real dashboard (about four minutes; it creates and removes a
+disposable service): start the stack with the demo target, then
+`E2E_SCREENSHOTS=1 npx playwright test e2e/screenshots.spec.ts` from `frontend/`.
+Review the images for anything sensitive before committing them.
+
+### Publishing
+
+[`.github/workflows/pages.yml`](.github/workflows/pages.yml) builds and validates the showcase on every
+change to `site/` or the screenshots (including pull requests), and deploys it from `main`. It uses
+minimal permissions (`contents: read`; `pages: write` and `id-token: write` only in the deploy job),
+official GitHub actions, a standard hosted runner, and a one-day artifact. Hosting on the free
+`github.io` address of a public repository costs nothing; no custom domain is involved.
+
+The deploy job is **off until the repository owner enables Pages**, so `main` stays green. Two one-time
+steps in the repository settings (admin rights are needed; the workflow cannot do this itself):
+
+1. **Settings, Pages, Build and deployment, Source: "GitHub Actions".**
+2. **Settings, Secrets and variables, Actions, Variables:** add `PAGES_ENABLED` with the value `true`.
+
+Then re-run the workflow (Actions, Showcase, Run workflow). The site appears at
+`https://gladwynl.github.io/CloudPulse/`. If GitHub ever asks for payment details to do this, stop:
+nothing in this project requires it.
+
+## Cloud reference architecture (design only)
+
+[`docs/cloud-reference-architecture.md`](docs/cloud-reference-architecture.md) describes how CloudPulse
+could be deployed on Azure (or similar) later: static frontend hosting, containerised API and worker,
+managed PostgreSQL, secrets management, private networking, TLS, authentication, logging, backups,
+CI/CD and scaling, with the trade-offs. It is a design document. **Nothing in it has been provisioned**,
+no infrastructure-as-code exists for it, and it names authentication as a hard prerequisite.
+
 ## Environment configuration
 
 All configuration is via environment variables. [`.env.example`](.env.example) documents
-every setting; copy it to `.env` (git-ignored). The same root `.env` is read by Docker Compose,
-by the backend when run from `backend/`, and by Vite.
+every setting; `python scripts/init_env.py` creates `.env` from it (git-ignored) with a generated
+database password. The same root `.env` is read by Docker Compose, by the backend when run from
+`backend/`, and by Vite.
+
+| Context | How it is configured |
+| --- | --- |
+| Local development | `.env` + `docker compose up`, or `.env` + a backend/frontend run on the host |
+| Automated tests | `TEST_DATABASE_URL` (you or CI); the database name must end in `_test` or `_ci`, so tests can never touch real data. Vitest sets its own fixed `VITE_*` values |
+| Hardened local run | the same `.env`, plus the override file (same-origin API, no docs, no CORS) |
+| Public showcase | none: it is static files with no configuration, no secrets and no API address |
+
+**Secrets.** The only real secret is the database password. Generate one with
+`python scripts/init_env.py`, or yourself: `python -c "import secrets; print(secrets.token_urlsafe(24))"`,
+PowerShell `[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(24))`,
+or `openssl rand -base64 24`. `.env` is never committed (CI generates its own throw-away one); nothing
+secret goes into `VITE_*` variables because they end up in the public JavaScript bundle; and the API
+rejects placeholder passwords when `ENVIRONMENT` is `staging` or `production`. Real cloud credentials
+are never used or needed. `python scripts/init_env.py --check` validates an existing `.env`
+without printing it.
 
 | Variable | Used by | Purpose |
 | --- | --- | --- |
@@ -880,7 +1165,8 @@ by the backend when run from `backend/`, and by Vite.
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | all | Database name and credentials (password required) |
 | `POSTGRES_HOST`, `POSTGRES_PORT` | host runs | Database location for a backend run on the host (default `127.0.0.1`; Compose sets `db`). Use `127.0.0.1`, not `localhost`: ports are published on IPv4 loopback only and some hosts try IPv6 first and stall |
 | `DATABASE_URL` | API, worker | Optional full SQLAlchemy URL; overrides `POSTGRES_*` |
-| `CORS_ORIGINS` | API | Comma-separated browser origins allowed to call the API |
+| `CORS_ORIGINS` | API | Comma-separated browser origins allowed to call the API (empty in the hardened stack: same origin) |
+| `API_DOCS_ENABLED` | API | Serve `/docs`, `/redoc`, `/openapi.json` (default `true`; the hardened stack sets `false`) |
 | `MONITORING_MIN_INTERVAL_SECONDS` / `MAX_` | API | Interval bounds (10 / 86400) |
 | `MONITORING_DEFAULT_INTERVAL_SECONDS` | API | Default interval for new resources (60) |
 | `MONITORING_DEFAULT_TIMEOUT_SECONDS` / `MAX_` | API | Default / maximum timeout (10 / 30) |
@@ -896,7 +1182,7 @@ by the backend when run from `backend/`, and by Vite.
 | `METRICS_MAX_TIMESERIES_BUCKETS` | API | Maximum buckets per series response (1000) |
 | `METRICS_DEFAULT_PAGE_SIZE`, `METRICS_MAX_PAGE_SIZE` | API | History page size (50 / 200) |
 | `ALERTING_MAX_RULES_PER_RESOURCE` | API | Rules per resource (20); bounds evaluation work per check |
-| `VITE_API_URL` | frontend | API base URL **as seen from the browser** (inlined at build time) |
+| `VITE_API_URL` | frontend | API base URL **as seen from the browser** (inlined at build time, so never a secret). The special value `same-origin` uses the nginx proxy |
 | `*_HOST_PORT` | Compose | Host ports published on 127.0.0.1 |
 
 ## Local development without Docker
@@ -1011,6 +1297,19 @@ create/edit/delete flows with confirmations, enable/disable, manual checks, ackn
 409 race and duplicate-submit protection), pagination, filters, the chart data builder and chart empty
 states, routing and accessibility attributes. Tests use an in-memory fake of the API (`src/test/`).
 
+### Deployment tooling and configuration tests
+
+`backend/tests/test_deploy_scripts.py` and `test_site_build.py` (no Docker needed) cover: backup file
+naming, refusal to overwrite, no partial file after a failed or empty dump, archive validation,
+checksum detection of a damaged backup, every restore safety refusal (live name, non-empty database,
+unsafe names), exit-code mapping, the env generator (never overwrites, strong password, never printed,
+weak-password detection), the port audit, the Compose files (loopback-only ports, the hardened override
+resets backend and database ports and merges to a single published port with read-only containers and
+dropped capabilities), non-root images with no embedded secrets, `.env.example` free of credentials,
+`.env`/backups git-ignored and untracked, and the showcase validator against broken and unsafe sites.
+`backend/tests/test_config.py` covers the placeholder-password and API-docs settings. The Docker round
+trips (backup, isolated verify, restore into a new database, port audit) run in CI's hardened job.
+
 ### Browser end-to-end (Playwright)
 
 Start the stack with the demo target, then run the tests in a real Chromium:
@@ -1023,12 +1322,14 @@ npm ci && npx playwright install chromium
 npm run e2e
 ```
 
-PowerShell: set the two variables with `$env:NAME = "value"` first. The specs
+PowerShell: set the two variables with `$env:NAME = "value"` first. To run the same suite against the
+hardened stack (API only through nginx), point both addresses at its single port:
+`E2E_BASE_URL=http://localhost:3000 E2E_API_URL=http://localhost:3000 npm run e2e`. The specs
 (`frontend/e2e/`) are: the full workflow (add a resource, watch it become healthy, view charts and
 history, create a rule, break the resource so an incident opens, view and acknowledge it, fix it and
 watch it resolve, delete the resource); resilience (unreachable API, 503, unknown ids); and layout
 (no horizontal overflow at 375, 430, 768, 1024, 1440 and 1920 px, drawer, dialogs, keyboard focus,
-reduced motion). Every test also fails on any browser console error, uncaught exception, or request
+reduced motion); and the static showcase served under `/CloudPulse/` (no stack needed). Every test also fails on any browser console error, uncaught exception, or request
 to a host other than the dashboard and the API.
 
 The tests create and delete only resources they name `e2e-…`, and never stop the shared demo
@@ -1049,17 +1350,28 @@ Failure details are logged server-side and never returned. Every response carrie
 
 ## Continuous integration
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and pull request:
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and pull request, on
+standard free GitHub-hosted runners (the repository is public). A new push cancels the older run of the
+same branch, every job has a timeout and minimal (`contents: read`) permissions, and uploaded artifacts
+are kept for 3 days.
 
-- **backend** — Ruff lint and format check; `alembic upgrade head` and `alembic check` against a
-  PostgreSQL 17 service container; full Pytest including the integration tests.
-- **frontend** — `npm ci`, ESLint, Prettier check, TypeScript check, Vitest, production build.
-- **docker** — builds the images, starts the full stack (with the demo target), waits for health,
-  and runs `scripts/smoke_test.py --docker-control` end to end (history, metrics, worker restart, and the
-  alert-to-incident lifecycle). It then installs Chromium and runs the Playwright browser tests against
-  that same stack, uploading traces if they fail.
+- **backend**: Ruff lint and format check; `pip-audit` of the pinned dependencies; `alembic upgrade head`
+  and `alembic check` against a PostgreSQL 17 service container; full Pytest including the integration
+  tests and the deployment-tooling tests.
+- **frontend**: `npm ci`, ESLint, `npm audit` (production dependencies, high and above), Prettier check,
+  TypeScript check, Vitest, production build.
+- **docker**: validates both Compose files, builds and starts the development stack with the demo target,
+  runs `scripts/smoke_test.py --docker-control` (history, metrics, worker restart, the alert-to-incident
+  lifecycle), then the Playwright browser tests (including the showcase checks), uploading traces on failure.
+- **docker-hardened** (in parallel): creates `.env` with `init_env.py`, starts the hardened stack, audits
+  that only the frontend publishes a port (on loopback), runs the smoke test through the nginx proxy, takes
+  a database backup and verifies it in a disposable database, then runs the whole Playwright suite against
+  the proxy-only stack.
+- **Showcase** ([`pages.yml`](.github/workflows/pages.yml)): builds and validates the static site on every
+  change to it, and deploys it to GitHub Pages once the owner has enabled Pages (see
+  [Publishing](#publishing)).
 
-Nothing is deployed.
+Nothing else is deployed.
 
 ## Portability notes
 
@@ -1070,8 +1382,11 @@ Nothing is deployed.
   and consistent formatting across Windows, macOS, and Linux.
 - Database data lives in a Docker named volume (`cloudpulse_postgres-data`), not in the repo.
   To move data between machines use `pg_dump`/`pg_restore`; otherwise re-run migrations.
-- Bootstrapping a new machine: install Git + Docker, clone, `cp .env.example .env`, set
-  `POSTGRES_PASSWORD`, `docker compose up --build`.
+- Bootstrapping a new machine: install Git, Docker and Python 3.12 (only for the helper scripts),
+  clone, `python scripts/init_env.py`, `docker compose up --build`. To bring your data along, copy a
+  backup file and follow [Recovering from a lost volume or machine](#recovering-from-a-lost-volume-or-machine).
+- The scripts, Compose files and docs use relative paths and environment variables only: no user
+  names, drive letters or machine names. Windows (Docker Desktop), Linux and macOS are supported.
 - Keep the working copy outside cloud-synced folders (e.g. OneDrive).
 
 ## Roadmap
@@ -1082,12 +1397,15 @@ Nothing is deployed.
 | 1 | Resource registry, scheduled HTTP checks, latest health, manual checks, SSRF protection | Done |
 | 2 | Metrics ingestion and history: atomic per-check records, availability/latency APIs, time series, retention | Done |
 | 3 | Alerting and incidents: rules, deterministic evaluation, incident lifecycle and timeline | Done |
-| 4 | Monitoring dashboard: React UI over every API, charts, browser E2E tests | **Current** |
-| 5 | Cloud deployment: Azure hosting, CD pipeline, infrastructure-as-code if justified | Planned |
+| 4 | Monitoring dashboard: React UI over every API, charts, browser E2E tests | Done |
+| 5 | Zero-cost deployment readiness: hardened local stack, backup and restore, CI hardening, static showcase, cloud reference design (no cloud resources) | **Current** |
+| 6 | To be decided with the owner. Candidates: authentication (a prerequisite for any public backend), notifications | Not started |
 
 Phase boundaries beyond the current phase are provisional and refined as each phase begins.
 ### Considerations for later phases
 
-Notification delivery (email, chat, webhooks) is separate work that would read `incident_events`; it
-would need its own retry and failure handling and must not run inside the check transaction. Any
-deployment beyond a trusted local machine needs an authentication and authorization layer first.
+Authentication and authorization are the gate for any public backend, and they should be built properly
+rather than quickly. Notification delivery (email, chat, webhooks) is separate work that would read
+`incident_events`; it would need its own retry and failure handling and must not run inside the check
+transaction. A real cloud deployment would also need a budget decision from the owner, since every
+managed database and container service has a price once any free allowance ends.

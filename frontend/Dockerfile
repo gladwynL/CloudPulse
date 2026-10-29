@@ -10,8 +10,9 @@ RUN npm ci
 
 COPY . .
 
-# Vite inlines VITE_* variables at build time. The API URL must be reachable
-# from the user's browser (not the Docker network), e.g. http://localhost:8000.
+# Vite inlines VITE_* variables at build time (never put secrets here: they end up in the public
+# bundle). The API URL must be reachable from the user's browser (not the Docker network), e.g.
+# http://localhost:8000, or the special value `same-origin` to use the nginx proxy in this image.
 ARG VITE_API_URL=http://localhost:8000
 ARG VITE_APP_ENV=local
 ENV VITE_API_URL=${VITE_API_URL} \
@@ -23,6 +24,7 @@ RUN npm run build
 FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY proxy.conf /etc/nginx/cloudpulse-proxy.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 8080

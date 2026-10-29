@@ -12,7 +12,7 @@ export function Logo({ size = 28 }: { size?: number }) {
       <path
         d="M5 17h6l3-7 4 13 3-6h6"
         fill="none"
-        stroke="var(--color-on-accent)"
+        stroke="var(--on-accent)"
         strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"

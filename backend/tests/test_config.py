@@ -55,3 +55,38 @@ def test_password_is_not_exposed_in_repr() -> None:
 
 def test_log_level_is_normalized() -> None:
     assert make_settings(log_level="debug").log_level == "DEBUG"
+
+
+def _settings(**overrides: object) -> Settings:
+    base: dict[str, object] = {"_env_file": None, "postgres_password": "x" * 20}
+    return Settings(**{**base, **overrides})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("environment", ["staging", "production"])
+@pytest.mark.parametrize("password", ["", "change-me", "short", "Password", "postgres"])
+def test_deployed_environments_reject_placeholder_database_passwords(
+    environment: str, password: str
+) -> None:
+    with pytest.raises(ValueError, match="POSTGRES_PASSWORD"):
+        _settings(environment=environment, postgres_password=password)
+
+
+def test_deployed_environments_accept_a_generated_password() -> None:
+    assert _settings(environment="production", postgres_password="Zx3-k9QpLm2_vT8wRa7").environment
+
+
+def test_local_and_test_environments_keep_simple_passwords() -> None:
+    assert _settings(environment="local", postgres_password="change-me")
+    assert _settings(environment="test", postgres_password="")
+
+
+def test_an_explicit_database_url_is_not_second_guessed() -> None:
+    settings = _settings(
+        environment="production", DATABASE_URL="postgresql+psycopg://u:p@db:5432/x"
+    )
+    assert settings.database_url_override is not None
+
+
+def test_api_docs_are_on_by_default_and_can_be_disabled() -> None:
+    assert _settings().api_docs_enabled is True
+    assert _settings(api_docs_enabled=False).api_docs_enabled is False

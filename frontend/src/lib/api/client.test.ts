@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, buildUrl, errorMessage, isApiError, request } from './client.ts';
 import { api } from './endpoints.ts';
 import { installMockApi, type MockApi } from '../../test/mockApi.ts';
@@ -32,6 +32,31 @@ describe('buildUrl', () => {
     const url = new URL(buildUrl('/api/v1/resources', { q: 'a&b=c' }));
     expect(url.searchParams.get('q')).toBe('a&b=c');
     expect([...url.searchParams.keys()]).toEqual(['q']);
+  });
+});
+
+describe('API origin configuration', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function loadBuildUrl() {
+    vi.resetModules();
+    return (await import('./client.ts')).buildUrl;
+  }
+
+  it('resolves "same-origin" against the page, so no direct API port is needed', async () => {
+    vi.stubEnv('VITE_API_URL', 'same-origin');
+    const url = new URL((await loadBuildUrl())('/api/v1/overview'));
+    expect(url.origin).toBe(window.location.origin);
+    expect(url.pathname).toBe('/api/v1/overview');
+  });
+
+  it('defaults to the local API and ignores trailing slashes', async () => {
+    vi.stubEnv('VITE_API_URL', '');
+    expect(new URL((await loadBuildUrl())('/health')).origin).toBe('http://localhost:8000');
+    vi.stubEnv('VITE_API_URL', 'https://api.example.test///');
+    expect((await loadBuildUrl())('/health')).toBe('https://api.example.test/health');
   });
 });
 

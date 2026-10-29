@@ -1,9 +1,9 @@
 # CloudPulse Architecture
 
-This document describes the architecture as implemented today (Phase 4) and the direction it
+This document describes the architecture as implemented today (Phase 5) and the direction it
 is designed to grow in. Anything under "Planned" does not exist yet.
 
-## Current (Phase 4)
+## Current (Phase 5)
 
 ```
  Browser / curl / Swagger
@@ -271,6 +271,55 @@ Vitest + Testing Library against an in-memory fake of the API (`src/test/mockApi
 recover → delete workflow, API-outage behaviour, and layout/accessibility at six viewport widths, with a
 per-test audit for console errors and external requests. CI runs the Playwright suite in the docker job.
 
+## Deployment architecture (Phase 5)
+
+The same five services run in two Compose configurations. Both are local; nothing is deployed to a cloud.
+
+```
+ Development                                     Hardened (docker-compose.hardened.yml)
+ ───────────                                     ──────────────────────────────────────
+ 127.0.0.1:3000  nginx (SPA)                     127.0.0.1:3000  nginx (SPA + reverse proxy)
+ 127.0.0.1:8000  API  ◄── browser (CORS)                            │ /api  /health  /ready
+ 127.0.0.1:5432  PostgreSQL                                         ▼ (internal network only)
+                                                                   API ──► PostgreSQL ◄── worker
+```
+
+- **One published port in the hardened profile.** nginx serves the SPA and forwards only `/api/`,
+  `/health` and `/ready` to the backend (resolved per request through Docker's DNS, so a recreated
+  backend is found again). The frontend is built with `VITE_API_URL=same-origin`, so there is no CORS and
+  the API and database have no host ports. API docs are off (`API_DOCS_ENABLED=false`) and nginx answers
+  404 for them.
+- **Container hardening** (hardened profile): read-only root filesystems with tmpfs only where a process
+  must write (`/tmp`, PostgreSQL's socket directory), all capabilities dropped (PostgreSQL's entrypoint keeps
+  CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID), `no-new-privileges`, memory and PID limits, rotated logs.
+  The images themselves run as non-root users in both profiles.
+- **Browser hardening**: a Content-Security-Policy allowing scripts only from the page's own origin,
+  `X-Frame-Options: DENY`, `nosniff`, a referrer policy and a permissions policy, sent by nginx.
+- **Configuration fails closed.** With `ENVIRONMENT=staging|production` the API refuses a short or
+  placeholder database password and the private-address allowlist. `scripts/init_env.py` generates a strong
+  password; the password never enters an image, a log or the frontend bundle (verified on the running stack).
+- **Startup contract**: `db` healthy, then the `migrate` job must complete successfully (a failure keeps the
+  API and worker from starting; re-running it on an existing database changes nothing), then `backend` and
+  `worker`, then `frontend`. Verified on a fresh volume, an existing volume, and across a switch between the
+  two profiles on one volume.
+- **Worker outage behaviour** (unchanged code, verified): when the database is unreachable the scheduler logs
+  each failed poll with exponential backoff capped near 30 s; the worker's heartbeat file stops updating, so
+  its health check turns unhealthy after about a minute; when the database returns it recovers by itself.
+- **Backup and recovery** (`scripts/db_backup.py`): `pg_dump -Fc` executed inside the database container
+  (no credentials leave it), never overwriting, validated and checksummed; `verify` restores into a
+  disposable container with no volume or published port; `restore` writes only into a new or empty
+  database. See the README for the recovery runbook.
+- **Static showcase** (`site/` + `scripts/build_site.py` + `.github/workflows/pages.yml`): script-free
+  HTML and CSS with relative URLs, a no-scripts/no-connections Content-Security-Policy, a builder that
+  refuses broken or unsafe content, and a deploy job that only runs after the owner enables GitHub Pages.
+  GitHub Pages cannot host the API, worker or database, so the showcase has no live data.
+- **CI** has four jobs plus the showcase workflow: backend (with `pip-audit`), frontend (with `npm audit`),
+  the development-stack smoke test and browser tests, and the hardened-stack port audit, smoke test,
+  backup verification and browser tests.
+
+Scope boundary: the future cloud design lives in
+[`cloud-reference-architecture.md`](cloud-reference-architecture.md) and is **not implemented**.
+
 ### Known limitations
 
 No authentication on the API or the dashboard (do not expose either; incident `MANUAL` actors are not verified identities); no notifications (incidents are records shown in the dashboard and API); incidents are never pruned; a target that flaps faster than the configured streaks can open repeatedly; one worker; history retained for a bounded period only
@@ -284,9 +333,9 @@ dependency.
 - **Notifications** (not scheduled): delivery of incident events by email/chat/webhook. It should consume
   `incident_events` outside the check transaction with its own retries, so a slow provider can never delay
   or fail a check.
-- **Phase 5 — deployment.** Azure hosting and, if justified, infrastructure-as-code (see
-  [`infra/`](../infra/README.md)); an authentication/authorization layer belongs before any
-  public exposure.
+- **Authentication and authorization** (a candidate next phase): a prerequisite for any public backend. See
+  [`cloud-reference-architecture.md`](cloud-reference-architecture.md), which is a design only: no cloud
+  resources exist and none are planned without an owner budget decision.
 
 New infrastructure (queues, caches, extra schedulers) will be introduced only when a phase
 requires it, with the reasoning recorded here.

@@ -11,7 +11,18 @@
 # Optional demo monitoring target (a local nginx the worker is allowed to reach):
 #   MONITORING_ALLOWED_LOCAL_HOSTS=demo-target:8080 docker compose --profile demo up --build
 
+# Production-style local run (only the frontend published, read-only containers, capabilities
+# dropped, API docs off): add the hardened override.
+#   docker compose -f docker-compose.yml -f docker-compose.hardened.yml up --build -d --wait
+
 name: cloudpulse
+
+# Docker's default json-file logs are unbounded; cap them so a long-running stack cannot fill a disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   db:
@@ -31,6 +42,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    logging: *default-logging
 
   # One-shot job that applies Alembic migrations before the API and worker start.
   # migrate, backend and worker all run the same image (built once, by `backend`).
@@ -67,10 +79,12 @@ services:
       METRICS_DEFAULT_PAGE_SIZE: ${METRICS_DEFAULT_PAGE_SIZE:-50}
       METRICS_MAX_PAGE_SIZE: ${METRICS_MAX_PAGE_SIZE:-200}
       ALERTING_MAX_RULES_PER_RESOURCE: ${ALERTING_MAX_RULES_PER_RESOURCE:-20}
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-true}
     depends_on:
       db:
         condition: service_healthy
     restart: "no"
+    logging: *default-logging
 
   backend:
     build:
@@ -85,6 +99,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    logging: *default-logging
 
   # Runs the polling scheduler. Exactly one worker is supported; the API never polls.
   worker:
@@ -106,6 +121,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    logging: *default-logging
 
   frontend:
     build:
@@ -119,6 +135,7 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    logging: *default-logging
 
   # Demo-only target for trying out monitoring locally (profile "demo").
   # GET /  -> 200 (healthy)    GET /missing -> 404 (degraded when 200 is expected)
@@ -132,6 +149,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    logging: *default-logging
 
 volumes:
   postgres-data:

@@ -1,17 +1,18 @@
 # infra/
 
-Cloud infrastructure for CloudPulse will live here.
+There is **no cloud infrastructure** for CloudPulse, and none is being created.
 
-**Phase 0 (current):** intentionally empty. Local infrastructure is defined by the root
-[`docker-compose.yml`](../docker-compose.yml) and the per-service Dockerfiles.
+CloudPulse is deliberately local-first: the full stack runs on one machine with Docker Compose
+([`docker-compose.yml`](../docker-compose.yml) for development, plus
+[`docker-compose.hardened.yml`](../docker-compose.hardened.yml) for a production-style local run).
+That infrastructure, and its backup, verification and CI automation, is the working deployment story
+for this project. See the README's
+[Deployment](../README.md#deployment-local-production-style) section.
 
-**Phase 5 (planned):** Azure deployment, with infrastructure-as-code (Terraform) introduced
-only if it is justified by the deployment shape at that point. Likely candidates:
+How CloudPulse could be deployed to a cloud later (and why that needs authentication and a budget
+decision first) is a design document only:
+[`docs/cloud-reference-architecture.md`](../docs/cloud-reference-architecture.md).
 
-- Azure Container Apps (API + frontend) or App Service for Containers
-- Azure Database for PostgreSQL – Flexible Server
-- Azure Container Registry
-- Azure Key Vault for secrets
-- Azure Monitor / Log Analytics for the API's structured JSON logs
-
-Nothing in this directory is deployed by CI today.
+This directory intentionally contains no Terraform, no provider configuration and nothing that can be
+applied. A large untested infrastructure-as-code project would add a claim the project cannot back up,
+and any real resource risks a charge. Nothing here is deployed by CI.

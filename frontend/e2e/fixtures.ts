@@ -3,6 +3,13 @@ import { expect, test as base, type APIRequestContext } from '@playwright/test';
 export const API_URL = process.env.E2E_API_URL ?? 'http://localhost:8000';
 export const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
 
+/**
+ * The API's routes, as route patterns. Listed individually (rather than `${API_URL}/**`) because in
+ * the hardened stack the API shares the dashboard's origin, and blocking everything would block
+ * the page itself.
+ */
+export const API_ROUTES = [`${API_URL}/api/v1/**`, `${API_URL}/health`, `${API_URL}/ready`];
+
 /** Where the demo target is reachable from the worker (inside the Compose network). */
 export const DEMO_TARGET = process.env.E2E_TARGET_URL ?? 'http://demo-target:8080';
 export const CHECK_INTERVAL = process.env.E2E_CHECK_INTERVAL ?? '5';

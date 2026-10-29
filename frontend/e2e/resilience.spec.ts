@@ -1,4 +1,4 @@
-import { API_URL, expect, test } from './fixtures';
+import { API_ROUTES, API_URL, expect, test } from './fixtures';
 
 // These tests break the API on purpose, so the browser's own "failed to load" console errors are
 // expected here. The no-external-requests audit still applies.
@@ -6,7 +6,9 @@ test.use({ auditConsole: false });
 
 test.describe('when the backend is unavailable', () => {
   test('the dashboard explains an unreachable API and recovers on retry', async ({ page }) => {
-    await page.route(`${API_URL}/**`, (route) => route.abort('connectionrefused'));
+    for (const pattern of API_ROUTES) {
+      await page.route(pattern, (route) => route.abort('connectionrefused'));
+    }
     await page.goto('/');
 
     await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
@@ -18,7 +20,7 @@ test.describe('when the backend is unavailable', () => {
     await expect(page.getByRole('heading', { name: 'Incidents', level: 1 })).toBeVisible();
     await expect(page.getByText('Cannot reach the API')).toBeVisible();
 
-    await page.unroute(`${API_URL}/**`);
+    for (const pattern of API_ROUTES) await page.unroute(pattern);
     await page.getByRole('button', { name: 'Try again' }).click();
     await expect(page.getByText('Cannot reach the API')).toHaveCount(0);
     await expect(page.getByLabel(/^API online/)).toBeVisible({ timeout: 20_000 });

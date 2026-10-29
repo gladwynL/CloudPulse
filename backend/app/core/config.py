@@ -7,6 +7,11 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy import URL
 
+# Placeholders that must never protect a deployed database.
+WEAK_PASSWORDS = frozenset(
+    {"change-me", "changeme", "password", "postgres", "cloudpulse", "admin", "secret"}
+)
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables (and an optional .env file).
@@ -25,6 +30,9 @@ class Settings(BaseSettings):
     app_name: str = "CloudPulse API"
     app_version: str = "0.1.0"
     environment: Literal["local", "test", "development", "staging", "production"] = "local"
+
+    # Interactive API docs (/docs, /redoc, /openapi.json). The hardened deployment turns them off.
+    api_docs_enabled: bool = True
 
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "json"
@@ -112,7 +120,21 @@ class Settings(BaseSettings):
                 "MONITORING_ALLOWED_LOCAL_HOSTS is a development-only setting and is not "
                 f"permitted when ENVIRONMENT={self.environment}"
             )
+        if self.environment in {"staging", "production"}:
+            self._require_real_database_credentials()
         return self
+
+    def _require_real_database_credentials(self) -> None:
+        """Fail closed on placeholder database passwords outside local/test environments."""
+        if self.database_url_override is not None:
+            return  # a full URL is the operator's responsibility
+        password = self.postgres_password.get_secret_value()
+        if len(password) < 12 or password.lower() in WEAK_PASSWORDS:
+            raise ValueError(
+                "POSTGRES_PASSWORD must be at least 12 characters and not a placeholder when "
+                f"ENVIRONMENT={self.environment} (generate one with: "
+                'python -c "import secrets; print(secrets.token_urlsafe(24))")'
+            )
 
     @field_validator("cors_origins", mode="before")
     @classmethod

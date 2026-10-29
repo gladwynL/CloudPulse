@@ -26,12 +26,6 @@ test.describe.serial('monitoring workflow', () => {
 
   const header = (page: Page) => page.locator('header.page__header');
 
-  /** Capture documentation screenshots when asked (`E2E_SCREENSHOTS=1`); a no-op otherwise. */
-  async function shot(page: Page, file: string) {
-    if (!process.env.E2E_SCREENSHOTS) return;
-    await page.screenshot({ path: `../docs/screenshots/${file}.png`, animations: 'disabled' });
-  }
-
   /** Re-run an assertion, reloading between attempts, until the backend's checks catch up. */
   async function eventually(page: Page, assertion: () => Promise<void>, timeout = 90_000) {
     await expect(async () => {
@@ -100,7 +94,6 @@ test.describe.serial('monitoring workflow', () => {
       await expect(page.getByRole('heading', { name: /^Summary/ })).toBeVisible();
     }
     await expect(page.getByRole('alert')).toHaveCount(0);
-    await shot(page, 'resource-detail');
   });
 
   test('create an alert rule from the Alert rules page', async ({ page }) => {
@@ -142,7 +135,6 @@ test.describe.serial('monitoring workflow', () => {
     const row = page.getByRole('row', { name: new RegExp(incidentTitle) });
     await expect(row.getByText('Open', { exact: true })).toBeVisible();
     await expect(row.getByText('Warning', { exact: true })).toBeVisible();
-    await shot(page, 'incidents');
   });
 
   test('the incident shows what triggered it, then can be acknowledged once', async ({ page }) => {
@@ -160,7 +152,6 @@ test.describe.serial('monitoring workflow', () => {
       'Incident opened',
     );
     await expect(page.getByText(/No user identity is attached/)).toBeVisible();
-    await shot(page, 'incident-detail');
 
     const acknowledge = page.getByRole('button', { name: /Acknowledge/ });
     await acknowledge.click();
@@ -200,7 +191,6 @@ test.describe.serial('monitoring workflow', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Recently resolved' })).toBeVisible();
     await expect(page.getByRole('link', { name: incidentTitle })).toBeVisible();
-    await shot(page, 'overview');
   });
 
   test('delete the resource after an explicit confirmation', async ({ page }) => {

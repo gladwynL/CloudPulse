@@ -1,0 +1,74 @@
+name: Showcase (GitHub Pages)
+
+# Publishes ONLY the static showcase in site/ (plus the real dashboard screenshots from
+# docs/screenshots/). It never builds or publishes the application, the API, any configuration or
+# any backups. Free for a public repository on standard GitHub-hosted runners.
+#
+# One-time owner setup (needs repository admin; see README "Public showcase"):
+#   1. Settings > Pages > Build and deployment > Source: "GitHub Actions"
+#   2. Settings > Secrets and variables > Actions > Variables: add PAGES_ENABLED = true
+# Until then the build job still validates the site on every change and the deploy job is skipped.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/screenshots/**"
+      - "scripts/build_site.py"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - "docs/screenshots/**"
+      - "scripts/build_site.py"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and validate the showcase
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Fails on broken links or images, scripts, external references, secrets, private addresses,
+      # unexpected file types, or a missing "static showcase / not publicly hosted" notice.
+      - name: Assemble and validate _site
+        run: python scripts/build_site.py --out _site
+
+      - name: Upload the Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+          retention-days: 1
+
+  deploy:
+    name: Deploy to GitHub Pages
+    # Only after the owner has enabled Pages (see the header) and only from main.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PAGES_ENABLED == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

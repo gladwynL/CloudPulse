@@ -284,4 +284,9 @@ def test_allowlist_is_empty_by_default_so_default_policy_is_strict() -> None:
 
 def test_blank_allowlist_env_value_means_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MONITORING_ALLOWED_LOCAL_HOSTS", "")
-    assert Settings(_env_file=None, environment="production").monitoring_allowed_local_hosts == []
+    assert (
+        Settings(
+            _env_file=None, environment="production", postgres_password="Zx3-k9QpLm2_vT8wRa7"
+        ).monitoring_allowed_local_hosts
+        == []
+    )

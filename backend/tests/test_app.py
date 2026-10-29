@@ -47,3 +47,15 @@ def test_cors_rejects_unknown_origin(client: TestClient) -> None:
         },
     )
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_disabling_api_docs_removes_every_documentation_route() -> None:
+    from app.core.config import Settings
+    from app.main import create_app
+
+    app = create_app(Settings(_env_file=None, api_docs_enabled=False))  # type: ignore[call-arg]
+    with TestClient(app) as client:
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            assert client.get(path).status_code == 404, path
+        # The API itself is unaffected.
+        assert client.get("/health").status_code == 200

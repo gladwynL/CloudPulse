@@ -44,7 +44,8 @@ export interface RequestOptions {
 }
 
 export function buildUrl(path: string, query?: Record<string, QueryValue>): string {
-  const url = new URL(`${config.apiUrl}${path}`);
+  // With a same-origin API (empty apiUrl) the path resolves against the page's own origin.
+  const url = new URL(`${config.apiUrl}${path}`, globalThis.location?.origin);
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value === undefined || value === null || value === '') continue;
     url.searchParams.set(key, String(value));

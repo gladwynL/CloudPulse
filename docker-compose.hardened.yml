@@ -1,0 +1,74 @@
+# Production-style LOCAL deployment. Layer this over the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.hardened.yml up --build --detach --wait
+#
+# What changes compared with the development stack:
+#   * The frontend (nginx) is the ONLY published port, bound to 127.0.0.1:${FRONTEND_HOST_PORT}.
+#     The browser talks to the API through nginx (same origin: /api, /health, /ready); the
+#     backend and PostgreSQL are reachable only on the internal Compose network.
+#   * API docs (/docs, /redoc, /openapi.json) are disabled and CORS is empty (same origin only).
+#   * Read-only root filesystems (writable tmpfs only where needed), all Linux capabilities
+#     dropped (PostgreSQL keeps the few its entrypoint needs), no-new-privileges, memory and
+#     process limits.
+#
+# This is still an UNAUTHENTICATED application on a trusted machine. Binding to 127.0.0.1 limits who
+# can reach it; it is not authentication. Do not publish the port to a network.
+#
+# The same data volume is used, so switching between the two stacks keeps your data. Rebuild the
+# frontend when switching (--build), because the API origin is fixed at build time.
+
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  db:
+    <<: *hardened
+    ports: !reset []
+    # initdb/entrypoint need to chown the data directory and drop to the postgres user.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    mem_limit: 512m
+    pids_limit: 200
+
+  migrate:
+    <<: *hardened
+    tmpfs: [/tmp]
+    mem_limit: 256m
+    pids_limit: 100
+
+  backend:
+    <<: *hardened
+    ports: !reset []
+    environment:
+      API_DOCS_ENABLED: "false"
+      CORS_ORIGINS: ""
+    tmpfs: [/tmp]
+    mem_limit: 384m
+    pids_limit: 200
+
+  worker:
+    <<: *hardened
+    # The heartbeat file used by the health check lives in /tmp.
+    tmpfs: [/tmp]
+    mem_limit: 384m
+    pids_limit: 200
+
+  frontend:
+    <<: *hardened
+    build:
+      args:
+        VITE_API_URL: same-origin
+    # nginx-unprivileged keeps its pid and temp files under /tmp.
+    tmpfs: [/tmp]
+    mem_limit: 128m
+    pids_limit: 100
+
+  demo-target:
+    <<: *hardened
+    tmpfs: [/tmp]
+    mem_limit: 64m
+    pids_limit: 50
