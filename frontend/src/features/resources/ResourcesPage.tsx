@@ -37,7 +37,7 @@ function ResourceRow({
   const name = resource.name;
   return (
     <tr>
-      <td>
+      <td data-label="Name">
         <div className="cell-title">
           <Link to={`/resources/${resource.id}`}>{name}</Link>
           {resource.description && (
@@ -47,10 +47,10 @@ function ResourceRow({
           )}
         </div>
       </td>
-      <td>
+      <td data-label="Status">
         <StatusBadge status={resource.current_status} />
       </td>
-      <td>
+      <td data-label="Target">
         <span
           className="mono truncate"
           style={{ display: 'block', maxWidth: 240 }}
@@ -59,15 +59,19 @@ function ResourceRow({
           {displayTarget(resource.url)}
         </span>
       </td>
-      <td className="num nowrap">{formatInterval(resource.check_interval_seconds)}</td>
-      <td className="num nowrap">{formatMs(resource.last_response_time_ms)}</td>
-      <td className="nowrap">
+      <td className="num nowrap" data-label="Interval">
+        {formatInterval(resource.check_interval_seconds)}
+      </td>
+      <td className="num nowrap" data-label="Latest response">
+        {formatMs(resource.last_response_time_ms)}
+      </td>
+      <td className="nowrap" data-label="Last checked">
         <RelativeTime iso={resource.last_checked_at} />
       </td>
-      <td>
+      <td data-label="Monitoring">
         <EnabledBadge enabled={resource.is_enabled} />
       </td>
-      <td>
+      <td data-label="">
         <div className="actions">
           <Button
             small
@@ -301,8 +305,8 @@ export function ResourcesPage() {
               title="Showing the last loaded data"
             />
           )}
-          <div className="table-wrap">
-            <table className="table">
+          <div className="table-wrap table-wrap--stack">
+            <table className="table table--stack">
               <caption className="sr-only">Monitored resources</caption>
               <thead>
                 <tr>

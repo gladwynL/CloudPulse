@@ -140,6 +140,44 @@ place a result becomes authoritative. The lease-guarded state `UPDATE` is the ga
 There is no second history-writing path. These properties have real-PostgreSQL tests, including
 concurrent completion and competing schedulers.
 
+### One check, end to end
+
+```mermaid
+sequenceDiagram
+  participant W as Worker
+  participant DB as PostgreSQL
+  participant T as Target service
+  W->>DB: claim due resources (FOR UPDATE SKIP LOCKED), stamp lease token and expiry
+  DB-->>W: claimed resources
+  W->>W: resolve the host, check every address against the policy, pin the address
+  W->>T: HTTP GET (outside any transaction)
+  T-->>W: status line, or an error / timeout
+  W->>DB: BEGIN
+  W->>DB: update the latest state, only if the lease token still matches
+  W->>DB: insert the history row
+  W->>DB: evaluate enabled rules, update counters, open or resolve an incident, append events
+  W->>DB: COMMIT
+  Note over W,DB: Any failure rolls the measurement back too, then the lease expires and the check is retried
+```
+
+### Alert rule state and incident lifecycle
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> INSUFFICIENT_DATA
+  INSUFFICIENT_DATA --> OK: first observation that does not match
+  INSUFFICIENT_DATA --> FIRING: failure streak reaches the trigger count
+  OK --> FIRING: failure streak reaches the trigger count
+  FIRING --> OK: recovery streak reaches recovery_successes
+  FIRING --> OK: rule disabled, deleted or reconfigured, or resource disabled or deleted
+```
+
+While a rule is `FIRING` it has exactly one active incident: `OPEN`, then `ACKNOWLEDGED` by hand (which
+does not resolve it), then `RESOLVED` automatically with a reason (`RECOVERED`, `RULE_DISABLED`,
+`RULE_RECONFIGURED`, `RULE_DELETED`, `RESOURCE_DISABLED` or `RESOURCE_DELETED`) and a matching timeline
+event. Details are in the next section.
+
 ### Alert evaluation
 
 Three concepts: a **rule** (configured condition), its **state** (firing now?), and an **incident**
@@ -311,7 +349,7 @@ The same five services run in two Compose configurations. Both are local; nothin
   database. See the README for the recovery runbook.
 - **Static showcase** (`site/` + `scripts/build_site.py` + `.github/workflows/pages.yml`): script-free
   HTML and CSS with relative URLs, a no-scripts/no-connections Content-Security-Policy, a builder that
-  refuses broken or unsafe content, and a deploy job that only runs after the owner enables GitHub Pages.
+  refuses broken or unsafe content, and a deploy job that runs from `main` (Pages is enabled for this repository).
   GitHub Pages cannot host the API, worker or database, so the showcase has no live data.
 - **CI** has four jobs plus the showcase workflow: backend (with `pip-audit`), frontend (with `npm audit`),
   the development-stack smoke test and browser tests, and the hardened-stack port audit, smoke test,

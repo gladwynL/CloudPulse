@@ -5,6 +5,7 @@ import { makeResource } from '../../test/fixtures.ts';
 import { installMockApi } from '../../test/mockApi.ts';
 import { renderWithProviders } from '../../test/render.tsx';
 import { ResourcesPage } from './ResourcesPage.tsx';
+import { expectCellsLabelledByHeaders } from '../../test/tableLabels.ts';
 
 const page = (items = [makeResource()], total = items.length, offset = 0) => ({
   items,
@@ -308,5 +309,14 @@ describe('ResourcesPage row actions', () => {
     await screen.findByRole('link', { name: 'Checkout API' });
     expect(screen.getByRole('button', { name: 'Check Checkout API now' })).toBeDisabled();
     expect(screen.getByText('Disabled')).toBeInTheDocument();
+  });
+});
+
+describe('ResourcesPage responsive table', () => {
+  it('labels every cell with its column header so the card layout stays understandable', async () => {
+    installMockApi().get('/api/v1/resources', page());
+    renderWithProviders(<ResourcesPage />);
+    const table = await screen.findByRole('table', { name: 'Monitored resources' });
+    expectCellsLabelledByHeaders(table, true);
   });
 });

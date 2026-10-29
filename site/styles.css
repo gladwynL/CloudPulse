@@ -18,8 +18,11 @@
   --down: #ff7a7a;
   --radius: 10px;
   --radius-lg: 14px;
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, 'Cascadia Code', Menlo, Consolas, monospace;
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "Cascadia Code", Menlo, Consolas, monospace;
 }
 
 * {
@@ -65,7 +68,7 @@ code {
 
 .wrap {
   width: 100%;
-  max-width: 1080px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 0 16px;
 }
@@ -156,11 +159,22 @@ code {
   font-size: 0.9rem;
 }
 
-/* Hero */
+/* Hero: copy on the left, a real screenshot on the right; stacked on narrow screens */
 .hero {
-  padding: 56px 0 40px;
-  background: radial-gradient(900px 300px at 20% -10%, rgb(107 149 255 / 0.18), transparent 70%);
+  padding: 56px 0 48px;
+  background: radial-gradient(
+    900px 340px at 15% -10%,
+    rgb(107 149 255 / 0.18),
+    transparent 70%
+  );
 }
+.hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+  gap: 40px;
+  align-items: center;
+}
+
 .eyebrow {
   color: var(--accent-strong);
   font-weight: 600;
@@ -170,38 +184,70 @@ code {
   margin: 0 0 12px;
 }
 h1 {
-  font-size: clamp(2rem, 6vw, 3.1rem);
-  line-height: 1.12;
+  font-size: clamp(2rem, 4.4vw, 2.75rem);
+  line-height: 1.14;
   margin: 0 0 16px;
-  max-width: 20ch;
+  max-width: 18ch;
+  text-wrap: balance;
 }
 .lead {
-  font-size: 1.15rem;
+  font-size: 1.1rem;
   color: var(--text-muted);
-  max-width: 62ch;
+  max-width: 50ch;
   margin: 0 0 24px;
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
 }
-.notice {
-  border: 1px solid var(--border-strong);
-  border-left: 4px solid var(--degraded);
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 14px 18px;
-  max-width: 70ch;
-}
-.notice h2 {
-  font-size: 1rem;
-  margin: 0 0 4px;
-}
-.notice p {
+/* The static-showcase notice: required and accurate, but quiet. */
+.note {
+  max-width: 50ch;
   margin: 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--degraded);
   color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.note strong {
+  color: var(--text);
+}
+
+.hero__shot {
+  margin: 0;
+}
+.hero__shot a {
+  display: block;
+  border-radius: var(--radius-lg);
+}
+.frame {
+  display: block;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow:
+    0 24px 60px rgb(0 0 0 / 0.55),
+    0 0 0 6px rgb(107 149 255 / 0.06);
+}
+.frame__bar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border);
+}
+.frame__bar i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.frame img {
+  width: 100%;
 }
 
 /* Sections */
@@ -244,12 +290,25 @@ h3 {
 .gallery .wide {
   grid-column: 1 / -1;
 }
-.gallery img {
+.gallery > figure > img {
   width: 100%;
   border-bottom: 1px solid var(--border);
 }
-.gallery .phone {
-  max-width: 340px;
+.gallery .phones__pair {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  padding: 20px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+}
+.gallery .phones__pair img {
+  width: min(260px, 44%);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+}
+.gallery .phones figcaption {
+  text-align: center;
 }
 figcaption {
   padding: 12px 16px;
@@ -328,7 +387,7 @@ figcaption strong {
   font-size: 0.9rem;
 }
 .node:not(:last-child)::after {
-  content: '→';
+  content: "→";
   position: absolute;
   right: -22px;
   top: 50%;
@@ -349,7 +408,7 @@ figcaption strong {
   border-color: var(--down);
 }
 .flow--states .node strong::before {
-  content: '';
+  content: "";
   display: inline-block;
   width: 10px;
   height: 10px;
@@ -407,12 +466,22 @@ pre code {
   margin: 0 0 6px;
 }
 
+@media (max-width: 900px) {
+  .hero__grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+  h1 {
+    max-width: 20ch;
+  }
+}
+
 @media (max-width: 720px) {
   .gallery {
     grid-template-columns: minmax(0, 1fr);
   }
   .node:not(:last-child)::after {
-    content: '↓';
+    content: "↓";
     right: auto;
     left: 50%;
     top: auto;

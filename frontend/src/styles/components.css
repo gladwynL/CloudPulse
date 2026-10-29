@@ -293,6 +293,157 @@ a.stat:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* Wide tables become labelled cards when *their container* is narrow (a phone, or a laptop
+   with the sidebar open), instead of hiding columns behind a sideways scroll. The container
+   query keys off the available width, not the viewport. */
+.table-wrap--stack,
+.table-wrap--stack-sm {
+  container-type: inline-size;
+}
+@container (max-width: 920px) {
+  .table--stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .table--stack,
+  .table--stack tbody,
+  .table--stack tr {
+    display: block;
+  }
+  .table--stack tr {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+  }
+  .table--stack tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .table--stack td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: 5px 0;
+    border: 0;
+    text-align: right;
+    white-space: normal;
+  }
+  .table--stack td::before {
+    content: attr(data-label);
+    flex: none;
+    color: var(--text-subtle);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: left;
+  }
+  /* The first cell is the row's title; the actions cell has no label. */
+  .table--stack td:first-child {
+    display: block;
+    text-align: left;
+    padding-bottom: 8px;
+    font-size: 1rem;
+  }
+  .table--stack td:first-child::before,
+  .table--stack td[data-label='']::before {
+    display: none;
+  }
+  .table--stack td[data-label=''] {
+    justify-content: flex-start;
+    padding-top: var(--space-2);
+  }
+  .table--stack .cell-title {
+    justify-items: end;
+    text-align: right;
+  }
+  .table--stack td:first-child .cell-title {
+    justify-items: start;
+    text-align: left;
+  }
+}
+/* Mid-width cards (a tablet, or a laptop with the sidebar open) use two columns of fields. */
+@container (min-width: 560px) and (max-width: 920px) {
+  .table--stack tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--space-6);
+  }
+  .table--stack td:first-child,
+  .table--stack td[data-label=''] {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (max-width: 640px) {
+  .table--stack-sm thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .table--stack-sm,
+  .table--stack-sm tbody,
+  .table--stack-sm tr {
+    display: block;
+  }
+  .table--stack-sm tr {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+  }
+  .table--stack-sm tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .table--stack-sm td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: 5px 0;
+    border: 0;
+    text-align: right;
+    white-space: normal;
+  }
+  .table--stack-sm td::before {
+    content: attr(data-label);
+    flex: none;
+    color: var(--text-subtle);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: left;
+  }
+  /* The first cell is the row's title; the actions cell has no label. */
+  .table--stack-sm td:first-child {
+    display: block;
+    text-align: left;
+    padding-bottom: 8px;
+    font-size: 1rem;
+  }
+  .table--stack-sm td:first-child::before,
+  .table--stack-sm td[data-label='']::before {
+    display: none;
+  }
+  .table--stack-sm td[data-label=''] {
+    justify-content: flex-start;
+    padding-top: var(--space-2);
+  }
+  .table--stack-sm .cell-title {
+    justify-items: end;
+    text-align: right;
+  }
+  .table--stack-sm td:first-child .cell-title {
+    justify-items: start;
+    text-align: left;
+  }
+}
+
 .cell-title {
   display: grid;
   gap: 2px;

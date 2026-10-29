@@ -33,7 +33,10 @@
             <li><a href="#quality">Quality</a></li>
             <li><a href="#run">Run it</a></li>
             <li>
-              <a class="button button--small" href="https://github.com/gladwynL/CloudPulse" rel="noopener"
+              <a
+                class="button button--small"
+                href="https://github.com/gladwynL/CloudPulse"
+                rel="noopener"
                 >Source</a
               >
             </li>
@@ -44,100 +47,129 @@
 
     <main id="main">
       <section class="hero" id="top">
-        <div class="wrap">
-          <p class="eyebrow">Project 3 of 3 · cloud and backend engineering portfolio</p>
-          <h1>Know when your services misbehave, and what happened.</h1>
-          <p class="lead">
-            CloudPulse checks HTTP services on a schedule, keeps their history, measures
-            availability and latency, evaluates alert rules, and manages the incidents that follow:
-            all in one FastAPI, PostgreSQL and React system that runs with a single Docker Compose
-            command.
-          </p>
-          <div class="actions">
-            <a class="button" href="#run">Run it locally</a>
-            <a class="button button--ghost" href="https://github.com/gladwynL/CloudPulse" rel="noopener"
-              >View the source on GitHub</a
-            >
-          </div>
-          <aside class="notice" aria-labelledby="static-title">
-            <h2 id="static-title">This page is a static showcase</h2>
-            <p>
-              The monitoring backend (API, worker and database) runs on a developer's machine and
-              is <strong>not hosted publicly</strong>: the dashboard has no authentication, so
-              exposing it would be unsafe. Nothing on this page is live data. The screenshots are
-              of the real application running locally, with synthetic services.
+        <div class="wrap hero__grid">
+          <div class="hero__copy">
+            <p class="eyebrow">Monitoring · alerting · incident management</p>
+            <h1>Know when your services misbehave, and why.</h1>
+            <p class="lead">
+              CloudPulse checks HTTP services on a schedule, keeps their
+              history, evaluates alert rules and manages the incidents that
+              follow. FastAPI, PostgreSQL and React, started with one Docker
+              Compose command.
             </p>
-          </aside>
+            <div class="actions">
+              <a class="button" href="#run">Run it locally</a>
+              <a
+                class="button button--ghost"
+                href="https://github.com/gladwynL/CloudPulse"
+                rel="noopener"
+                >View source on GitHub</a
+              >
+            </div>
+            <p class="note" role="note">
+              <strong>This page is a static showcase.</strong> The real
+              application runs locally and is not hosted publicly: it has no
+              authentication yet, so it is deliberately not exposed. The
+              screenshots are real, with synthetic services.
+            </p>
+          </div>
+
+          <figure class="hero__shot">
+            <a
+              href="assets/overview.png"
+              aria-label="Open the full-size overview screenshot"
+            >
+              <span class="frame">
+                <span class="frame__bar" aria-hidden="true"
+                  ><i></i><i></i><i></i
+                ></span>
+                <img
+                  src="assets/overview-hero.png"
+                  width="1000"
+                  height="700"
+                  alt="The CloudPulse overview: resource counts by health status, active incidents, a health distribution bar and a service list sorted by severity."
+                />
+              </span>
+            </a>
+          </figure>
         </div>
       </section>
 
-      <section id="screens" class="wrap section" aria-labelledby="screens-title">
+      <section
+        id="screens"
+        class="wrap section"
+        aria-labelledby="screens-title"
+      >
         <h2 id="screens-title">The dashboard</h2>
         <p class="section-lead">
-          Real screenshots of the React dashboard talking to the real API. Availability is
-          calculated from the checks that ran and is labelled that way; gaps in a chart mean "no
-          checks", never downtime.
+          Real screenshots of the React dashboard talking to the real API.
+          Availability is calculated from the checks that ran and is labelled
+          that way: a gap in a chart means "no checks", never downtime.
         </p>
         <div class="gallery">
           <figure class="wide">
             <img
-              src="assets/overview.png"
-              width="1280"
-              height="720"
-              alt="The overview page: counts of healthy, degraded and down resources, active incidents, a health distribution bar and a service list sorted by severity."
-            />
-            <figcaption>
-              <strong>Overview.</strong> Exact counts computed by the API over every resource, active
-              incidents, and the most severe services first.
-            </figcaption>
-          </figure>
-          <figure class="wide">
-            <img
               src="assets/resource-detail.png"
-              width="1280"
+              width="1440"
+              height="1100"
               loading="lazy"
-              alt="A resource detail page with availability and latency summary, a response-time chart and an availability chart that dips while the service was degraded, and the check history table."
+              alt="A resource detail page: availability and latency summary, a response-time chart, an availability chart that dips while the service was degraded, and the check history."
             />
             <figcaption>
-              <strong>Resource detail.</strong> Summary statistics, response-time and availability
-              charts, and cursor-paginated check history.
+              <strong>Resource detail.</strong> Summary statistics,
+              response-time and availability charts, and cursor-paginated check
+              history. The dip is a service that went degraded and recovered.
             </figcaption>
           </figure>
           <figure>
             <img
               src="assets/incident-detail.png"
-              width="1280"
-              height="720"
+              width="1440"
+              height="900"
               loading="lazy"
-              alt="An incident detail page showing the triggering check, the rule, and an incident timeline with an Acknowledge button."
+              alt="An incident detail page: the triggering check, the rule that fired and the incident timeline, with an Acknowledge button."
             />
             <figcaption>
-              <strong>Incident.</strong> The measurement that opened it, a durable timeline, and
-              Acknowledge. Incidents resolve themselves on recovery.
+              <strong>Incident.</strong> The measurement that opened it, a
+              durable timeline, and Acknowledge. Incidents resolve themselves on
+              recovery.
             </figcaption>
           </figure>
           <figure>
             <img
               src="assets/alert-rules.png"
-              width="1280"
-              height="720"
+              width="1440"
+              height="900"
               loading="lazy"
-              alt="The alert rules page listing rules with their plain-language condition, severity and state."
+              alt="The alert rules page: each rule in plain language with its severity, state and last evaluation."
             />
             <figcaption>
-              <strong>Alert rules.</strong> Consecutive-failure, latency-threshold and immediate-status
-              rules, described in plain language.
+              <strong>Alert rules.</strong> Consecutive-failure,
+              latency-threshold and immediate-status rules, with live state.
             </figcaption>
           </figure>
-          <figure class="phone">
-            <img
-              src="assets/overview-mobile.png"
-              width="390"
-              height="844"
-              loading="lazy"
-              alt="The overview page on a phone-sized screen with the navigation collapsed into a menu button."
-            />
-            <figcaption><strong>Responsive.</strong> The same views at phone width.</figcaption>
+          <figure class="phones wide">
+            <div class="phones__pair">
+              <img
+                src="assets/overview-mobile.png"
+                width="390"
+                height="844"
+                loading="lazy"
+                alt="The overview on a phone: the navigation collapses into a menu button and the counts reflow into two columns."
+              />
+              <img
+                src="assets/alert-rules-mobile.png"
+                width="390"
+                height="844"
+                loading="lazy"
+                alt="The alert rules on a phone: each rule is a card with labelled fields instead of a wide table."
+              />
+            </div>
+            <figcaption>
+              <strong>Responsive.</strong> On narrow screens wide tables become
+              labelled cards, so state and actions are never hidden behind a
+              sideways scroll.
+            </figcaption>
           </figure>
         </div>
       </section>
@@ -149,44 +181,49 @@
             <li>
               <h3>Scheduled checks</h3>
               <p>
-                A dedicated worker claims due resources with PostgreSQL leases, so a check never
-                runs twice and a crash is recovered when the lease expires.
+                A dedicated worker claims due resources with PostgreSQL leases,
+                so a check never runs twice and a crash is recovered when the
+                lease expires.
               </p>
             </li>
             <li>
               <h3>History and metrics</h3>
               <p>
-                Every accepted check is stored atomically with the latest state. Availability,
-                p50/p95 latency and time-bucketed series are served by the API; retention is
-                automatic.
+                Every accepted check is stored atomically with the latest state.
+                Availability, p50/p95 latency and time-bucketed series are
+                served by the API; retention is automatic.
               </p>
             </li>
             <li>
               <h3>Alerting</h3>
               <p>
-                Rules are evaluated in the same transaction as the check, with persisted counters, so
-                a restart never loses progress or double-fires.
+                Rules are evaluated in the same transaction as the check, with
+                persisted counters, so a restart never loses progress or
+                double-fires.
               </p>
             </li>
             <li>
               <h3>Incident management</h3>
               <p>
-                One incident per problem, acknowledgement by hand, automatic resolution on
-                recovery, and a timeline that survives deleting the resource.
+                One incident per problem, acknowledgement by hand, automatic
+                resolution on recovery, and a timeline that survives deleting
+                the resource.
               </p>
             </li>
             <li>
               <h3>Safe by default</h3>
               <p>
-                An SSRF guard blocks private and metadata addresses, TLS is verified, URLs'
-                query strings are never logged or displayed, and the app binds to loopback.
+                An SSRF guard pins resolved addresses and blocks private and
+                metadata ranges, TLS is verified, URLs' query strings are never
+                logged or displayed, and the app binds to loopback.
               </p>
             </li>
             <li>
               <h3>Operable</h3>
               <p>
-                Health and readiness probes, JSON logs, a hardened Compose profile, tested backup
-                and restore, and CI that runs the whole system in a browser.
+                Health and readiness probes, JSON logs, a hardened Compose
+                profile, verified backup and restore, and CI that drives the
+                whole system in a browser.
               </p>
             </li>
           </ul>
@@ -198,28 +235,61 @@
 
         <h3>Architecture</h3>
         <p class="section-lead">
-          Everything is a container on one Compose network. In the hardened profile only the web
-          entry point is published, on <code>127.0.0.1</code>.
+          Everything is a container on one Compose network. In the hardened
+          profile only the web entry point is published, on
+          <code>127.0.0.1</code>.
         </p>
         <ol class="flow" aria-label="Request path">
-          <li class="node"><strong>Browser</strong><span>React dashboard</span></li>
-          <li class="node"><strong>nginx</strong><span>static files and <code>/api</code> proxy</span></li>
-          <li class="node"><strong>FastAPI</strong><span>REST API, manual checks</span></li>
-          <li class="node node--store"><strong>PostgreSQL</strong><span>state, history, leases, incidents</span></li>
+          <li class="node">
+            <strong>Browser</strong><span>React dashboard</span>
+          </li>
+          <li class="node">
+            <strong>nginx</strong
+            ><span>static files and <code>/api</code> proxy</span>
+          </li>
+          <li class="node">
+            <strong>FastAPI</strong><span>REST API, manual checks</span>
+          </li>
+          <li class="node node--store">
+            <strong>PostgreSQL</strong
+            ><span>state, history, leases, incidents</span>
+          </li>
         </ol>
         <ol class="flow" aria-label="Monitoring path">
-          <li class="node node--store"><strong>PostgreSQL</strong><span>due resources</span></li>
-          <li class="node"><strong>Worker</strong><span>claim, check, store, evaluate alerts</span></li>
-          <li class="node"><strong>Monitored services</strong><span>HTTP GET, SSRF-guarded</span></li>
+          <li class="node node--store">
+            <strong>PostgreSQL</strong><span>due resources</span>
+          </li>
+          <li class="node">
+            <strong>Worker</strong
+            ><span>claim, check, store, evaluate alerts</span>
+          </li>
+          <li class="node">
+            <strong>Monitored services</strong
+            ><span>HTTP GET, SSRF-guarded</span>
+          </li>
         </ol>
 
         <h3>From a failing check to a resolved incident</h3>
         <ol class="flow flow--states" aria-label="Alert to incident lifecycle">
-          <li class="node node--ok"><strong>Check runs</strong><span>result stored with the latest state</span></li>
-          <li class="node node--warn"><strong>Rule counts</strong><span>for example 3 unhealthy checks in a row</span></li>
-          <li class="node node--bad"><strong>Incident opens</strong><span>exactly one per problem</span></li>
-          <li class="node node--warn"><strong>Acknowledged</strong><span>by hand; does not resolve it</span></li>
-          <li class="node node--ok"><strong>Resolved</strong><span>automatically after healthy checks</span></li>
+          <li class="node node--ok">
+            <strong>Check runs</strong
+            ><span>result stored with the latest state</span>
+          </li>
+          <li class="node node--warn">
+            <strong>Rule counts</strong
+            ><span>for example 3 unhealthy checks in a row</span>
+          </li>
+          <li class="node node--bad">
+            <strong>Incident opens</strong><span>exactly one per problem</span>
+          </li>
+          <li class="node node--warn">
+            <strong>Acknowledged</strong
+            ><span>by hand; does not resolve it</span>
+          </li>
+          <li class="node node--ok">
+            <strong>Resolved</strong
+            ><span>automatically after healthy checks</span>
+          </li>
         </ol>
 
         <h3>Stack</h3>
@@ -240,6 +310,7 @@
           <li>Pytest</li>
           <li>Vitest</li>
           <li>Playwright</li>
+          <li>axe-core</li>
         </ul>
       </section>
 
@@ -247,16 +318,38 @@
         <div class="wrap section">
           <h2 id="quality-title">Quality and delivery</h2>
           <ul class="stats">
-            <li><strong>764</strong><span>backend tests, including PostgreSQL integration tests</span></li>
-            <li><strong>218</strong><span>frontend component and contract tests</span></li>
-            <li><strong>30</strong><span>browser tests against the full Docker stack</span></li>
-            <li><strong>3 + 1</strong><span>CI jobs on free runners: backend, frontend, stack, hardened stack</span></li>
+            <li>
+              <strong>764</strong
+              ><span
+                >backend tests, including PostgreSQL integration tests</span
+              >
+            </li>
+            <li>
+              <strong>225</strong
+              ><span>frontend component and contract tests</span>
+            </li>
+            <li>
+              <strong>38</strong
+              ><span
+                >browser tests on the full Docker stack, with WCAG A/AA
+                checks</span
+              >
+            </li>
+            <li>
+              <strong>3 + 1</strong
+              ><span
+                >CI jobs on free runners: backend, frontend, stack, hardened
+                stack</span
+              >
+            </li>
           </ul>
           <p>
-            Every push runs linting, type checks, the test suites, a full-stack smoke test of the
-            check, alert, incident and recovery loop, and browser tests that add a service, break
-            it, acknowledge the incident, fix it and delete it. A separate job brings up the
-            hardened stack and verifies that a database backup restores into a disposable database.
+            Every push runs linting, type checks, dependency audits, the test
+            suites, a full-stack smoke test of the check, alert, incident and
+            recovery loop, and browser tests that add a service, break it,
+            acknowledge the incident, fix it and delete it. A separate job
+            brings up the hardened stack and verifies that a database backup
+            restores into a disposable database.
           </p>
         </div>
       </section>
@@ -264,8 +357,8 @@
       <section id="run" class="wrap section" aria-labelledby="run-title">
         <h2 id="run-title">Run the real thing</h2>
         <p class="section-lead">
-          You need Git and Docker. The first command creates a <code>.env</code> with a generated
-          database password.
+          You need Git and Docker. The first command creates a
+          <code>.env</code> with a generated database password.
         </p>
         <pre><code>git clone https://github.com/gladwynL/CloudPulse.git
 cd CloudPulse
@@ -273,9 +366,10 @@ python scripts/init_env.py
 docker compose up --build --detach --wait
 # dashboard: http://localhost:3000</code></pre>
         <p>
-          The README covers the demo target, the hardened profile, backup and restore, and the
-          tests. The project is local-first by design: it has no authentication, so a public
-          cloud deployment is documented as a future design and has deliberately not been done.
+          The README covers the demo target, the hardened profile, backup and
+          restore, and the tests. The project is local-first by design: it has
+          no authentication, so a public cloud deployment is documented as a
+          future design and has deliberately not been done.
         </p>
       </section>
     </main>
@@ -283,12 +377,18 @@ docker compose up --build --detach --wait
     <footer class="site-footer">
       <div class="wrap">
         <p>
-          CloudPulse is an engineering portfolio project. This static page contains no live data,
-          scripts or tracking.
+          CloudPulse is an engineering portfolio project. This static showcase
+          contains no live data, scripts or tracking; the application it shows
+          is not hosted publicly.
         </p>
         <p>
-          <a href="https://github.com/gladwynL/CloudPulse" rel="noopener">Source code</a> ·
-          <a href="https://github.com/gladwynL/CloudPulse#readme" rel="noopener">README</a>
+          <a href="https://github.com/gladwynL/CloudPulse" rel="noopener"
+            >Source code</a
+          >
+          ·
+          <a href="https://github.com/gladwynL/CloudPulse#readme" rel="noopener"
+            >README</a
+          >
         </p>
       </div>
     </footer>

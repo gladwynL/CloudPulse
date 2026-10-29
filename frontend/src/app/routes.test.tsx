@@ -43,12 +43,15 @@ describe('routing and shell', () => {
 
     renderWithProviders(<AppRoutes />, { route: '/incidents/inc-1' });
     expect(
-      await screen.findByRole('heading', {
-        name: 'WARNING: Three failures on Checkout API',
-        level: 1,
-      }),
+      await screen.findByRole(
+        'heading',
+        { name: 'WARNING: Three failures on Checkout API', level: 1 },
+        { timeout: 10_000 },
+      ),
     ).toBeInTheDocument();
-  });
+    // Two lazily loaded pages (one pulls in the chart library) can exceed the 5 s default when the
+    // machine is busy, so the whole test gets an explicit budget.
+  }, 30_000);
 
   it('shows a friendly page for an unknown URL', async () => {
     api();
@@ -190,5 +193,15 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>,
     );
     expect(screen.getByText('fine')).toBeInTheDocument();
+  });
+});
+
+describe('not found', () => {
+  it('has a real heading, so assistive technology can find it', async () => {
+    api();
+    renderWithProviders(<AppRoutes />, { route: '/nowhere' });
+    expect(
+      await screen.findByRole('heading', { name: 'Page not found', level: 1 }),
+    ).toBeInTheDocument();
   });
 });

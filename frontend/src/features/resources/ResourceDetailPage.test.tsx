@@ -13,6 +13,7 @@ import {
 import { installMockApi, type MockApi } from '../../test/mockApi.ts';
 import { renderWithProviders } from '../../test/render.tsx';
 import { ResourceDetailPage } from './ResourceDetailPage.tsx';
+import { expectCellsLabelledByHeaders } from '../../test/tableLabels.ts';
 
 const check = (id: string, overrides: Partial<CheckResult> = {}): CheckResult => ({
   id,
@@ -260,5 +261,13 @@ describe('ResourceDetailPage', () => {
     ).toBeInTheDocument();
     expect((await screen.findAllByText('Server error')).length).toBeGreaterThan(0);
     expect(await screen.findByText('90 of 100 checks healthy')).toBeInTheDocument();
+  });
+});
+
+describe('ResourceDetailPage history table', () => {
+  it('labels every history cell with its column header for the card layout', async () => {
+    api();
+    renderDetail();
+    expectCellsLabelledByHeaders(await screen.findByRole('table', { name: /Check history/ }));
   });
 });

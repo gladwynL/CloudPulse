@@ -51,7 +51,7 @@ function RuleRow({
 
   return (
     <tr>
-      <td>
+      <td data-label="Rule">
         <div className="cell-title">
           <span style={{ fontWeight: 600 }}>{rule.name}</span>
           {rule.description && (
@@ -61,20 +61,20 @@ function RuleRow({
           )}
         </div>
       </td>
-      <td>
+      <td data-label="Resource">
         <Link to={`/resources/${rule.resource_id}`}>{rule.resource_name}</Link>
       </td>
-      <td>
+      <td data-label="Condition">
         <div className="cell-title">
           <span>{RULE_TYPE_LABELS[rule.rule_type]}</span>
           <span className="cell-sub">{describeTrigger(rule)}</span>
           <span className="cell-sub">{describeRecovery(rule)}</span>
         </div>
       </td>
-      <td>
+      <td data-label="Severity">
         <SeverityBadge severity={rule.severity} />
       </td>
-      <td>
+      <td data-label="State">
         <div className="cell-title">
           <AlertStateBadge state={rule.current_state} />
           <span className="cell-sub">
@@ -85,13 +85,13 @@ function RuleRow({
           </span>
         </div>
       </td>
-      <td className="nowrap">
+      <td className="nowrap" data-label="Last evaluated">
         <RelativeTime iso={rule.last_evaluated_at} empty="not yet" />
       </td>
-      <td>
+      <td data-label="Status">
         <EnabledBadge enabled={rule.is_enabled} />
       </td>
-      <td>
+      <td data-label="">
         <div className="actions">
           <Button
             small
@@ -279,8 +279,8 @@ export function AlertsPage() {
         )
       ) : (
         <>
-          <div className="table-wrap">
-            <table className="table">
+          <div className="table-wrap table-wrap--stack">
+            <table className="table table--stack">
               <caption className="sr-only">Alert rules</caption>
               <thead>
                 <tr>

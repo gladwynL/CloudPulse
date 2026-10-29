@@ -130,7 +130,7 @@
   border-bottom: 1px solid var(--border);
 }
 
-.topbar__menu {
+.topbar > .topbar__menu {
   display: none;
 }
 
@@ -270,7 +270,7 @@
     padding: 0 var(--space-4);
   }
 
-  .topbar__menu {
+  .topbar > .topbar__menu {
     display: inline-flex;
   }
 

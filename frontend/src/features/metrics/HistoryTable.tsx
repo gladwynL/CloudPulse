@@ -57,8 +57,8 @@ export function HistoryTable({ resourceId, period }: { resourceId: string; perio
         </EmptyState>
       ) : (
         <>
-          <div className="table-wrap">
-            <table className="table">
+          <div className="table-wrap table-wrap--stack-sm">
+            <table className="table table--stack-sm">
               <caption className="sr-only">Check history, newest first</caption>
               <thead>
                 <tr>
@@ -77,15 +77,19 @@ export function HistoryTable({ resourceId, period }: { resourceId: string; perio
               <tbody>
                 {items.map((check) => (
                   <tr key={check.id}>
-                    <td className="nowrap">
+                    <td className="nowrap" data-label="Time">
                       <DateTime iso={check.checked_at} />
                     </td>
-                    <td>
+                    <td data-label="Result">
                       <StatusBadge status={check.status} />
                     </td>
-                    <td className="num nowrap">{formatMs(check.response_time_ms)}</td>
-                    <td className="num">{check.http_status_code ?? '—'}</td>
-                    <td>
+                    <td className="num nowrap" data-label="Response time">
+                      {formatMs(check.response_time_ms)}
+                    </td>
+                    <td className="num" data-label="HTTP">
+                      {check.http_status_code ?? '—'}
+                    </td>
+                    <td data-label="Error">
                       {check.error_category ? (
                         <div className="cell-title">
                           <span>{CATEGORY_LABELS[check.error_category]}</span>
@@ -97,7 +101,9 @@ export function HistoryTable({ resourceId, period }: { resourceId: string; perio
                         <span className="subtle">—</span>
                       )}
                     </td>
-                    <td>{check.source === 'MANUAL' ? 'Manual' : 'Scheduled'}</td>
+                    <td data-label="Source">
+                      {check.source === 'MANUAL' ? 'Manual' : 'Scheduled'}
+                    </td>
                   </tr>
                 ))}
               </tbody>

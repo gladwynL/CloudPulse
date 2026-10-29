@@ -5,6 +5,7 @@ import { makeOverview, makeResource, makeRule, makeRuleListItem } from '../../te
 import { installMockApi, type MockApi } from '../../test/mockApi.ts';
 import { renderWithProviders } from '../../test/render.tsx';
 import { AlertsPage } from './AlertsPage.tsx';
+import { expectCellsLabelledByHeaders } from '../../test/tableLabels.ts';
 
 const page = (items = [makeRuleListItem()], total = items.length) => ({
   items,
@@ -324,5 +325,14 @@ describe('AlertsPage edit, disable and delete', () => {
     const dialog = await screen.findByRole('dialog');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delete rule' }));
     expect(await screen.findByText('Alert rule not found')).toBeInTheDocument();
+  });
+});
+
+describe('AlertsPage responsive table', () => {
+  it('labels every cell with its column header so the card layout stays understandable', async () => {
+    baseApi();
+    renderWithProviders(<AlertsPage />);
+    const table = await screen.findByRole('table', { name: 'Alert rules' });
+    expectCellsLabelledByHeaders(table, true);
   });
 });

@@ -24,7 +24,16 @@ export function Modal({ open, onClose, title, description, children, footer }: M
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
+    if (open && !dialog.open) {
+      dialog.showModal();
+      // Native modals focus their first focusable element, which is the close button. For a form,
+      // the person expects to start typing, so move focus to the first field.
+      dialog
+        .querySelector<HTMLElement>(
+          '.dialog__body input, .dialog__body select, .dialog__body textarea',
+        )
+        ?.focus();
+    }
     if (!open && dialog.open) dialog.close();
   }, [open]);
 

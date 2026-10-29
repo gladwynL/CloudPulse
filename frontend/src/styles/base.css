@@ -66,6 +66,15 @@ a:hover {
   text-decoration: underline;
 }
 
+/* A link inside running text must be recognisable without relying on colour (WCAG 1.4.1). */
+p a,
+.chart-note a,
+.state__body a,
+.notice a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 code,
 .mono {
   font-family: var(--font-mono);

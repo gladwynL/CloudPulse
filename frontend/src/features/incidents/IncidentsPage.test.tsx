@@ -5,6 +5,7 @@ import { makeIncident, makeResource } from '../../test/fixtures.ts';
 import { installMockApi, type MockApi } from '../../test/mockApi.ts';
 import { renderWithProviders } from '../../test/render.tsx';
 import { IncidentsPage } from './IncidentsPage.tsx';
+import { expectCellsLabelledByHeaders } from '../../test/tableLabels.ts';
 
 const resources = { items: [makeResource()], total: 1, limit: 200, offset: 0 };
 
@@ -130,5 +131,13 @@ describe('IncidentsPage', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Service unavailable');
     expect(within(alert).getByRole('button', { name: /try again/i })).toBeInTheDocument();
+  });
+});
+
+describe('IncidentsPage responsive table', () => {
+  it('labels every cell with its column header so the card layout stays understandable', async () => {
+    api().get('/api/v1/incidents', { items: [makeIncident()], limit: 25, next_cursor: null });
+    renderWithProviders(<IncidentsPage />);
+    expectCellsLabelledByHeaders(await screen.findByRole('table'));
   });
 });

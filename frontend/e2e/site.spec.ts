@@ -77,19 +77,51 @@ test.describe('static showcase under /CloudPulse/', () => {
       [...document.images].filter((i) => !i.complete || i.naturalWidth === 0).map((i) => i.src),
     );
     expect(broken).toEqual([]);
-    expect(await page.locator('img').count()).toBeGreaterThanOrEqual(5);
+    expect(await page.locator('img').count()).toBeGreaterThanOrEqual(7);
     expect(errors).toEqual([]);
     expect(foreign).toEqual([]);
   });
 
-  test('says plainly that it is static and the backend is not publicly hosted', async ({
+  test('says plainly that it is static and the backend is not publicly hosted, quietly', async ({
     page,
   }) => {
     await page.goto(`${origin}${PREFIX}`);
-    await expect(
-      page.getByRole('heading', { name: 'This page is a static showcase' }),
-    ).toBeVisible();
-    await expect(page.getByText(/not hosted publicly/i)).toBeVisible();
+    const note = page.getByRole('note');
+    await expect(note).toContainText('static showcase');
+    await expect(note).toContainText('not hosted publicly');
+    await expect(note).toContainText('no authentication');
+    // It must not outrank the headline: smaller text than the lead paragraph.
+    const sizes = await page.evaluate(() => ({
+      note: parseFloat(getComputedStyle(document.querySelector('.note')!).fontSize),
+      lead: parseFloat(getComputedStyle(document.querySelector('.lead')!).fontSize),
+    }));
+    expect(sizes.note).toBeLessThan(sizes.lead);
+  });
+
+  test('the hero is two columns on a desktop, with a screenshot big enough to read', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${origin}${PREFIX}`);
+    const heading = await page.getByRole('heading', { level: 1 }).boundingBox();
+    const shot = await page.locator('.hero__shot img').boundingBox();
+    expect(heading && shot).toBeTruthy();
+    // Side by side: the screenshot starts to the right of the headline's column.
+    expect(shot!.x).toBeGreaterThan(heading!.x + 300);
+    expect(shot!.width).toBeGreaterThanOrEqual(520);
+    // And is in the first screen, not pushed below the fold.
+    expect(shot!.y).toBeLessThan(500);
+  });
+
+  test('the hero stacks in reading order on a phone', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`${origin}${PREFIX}`);
+    const heading = await page.getByRole('heading', { level: 1 }).boundingBox();
+    const cta = await page.getByRole('link', { name: 'Run it locally' }).boundingBox();
+    const shot = await page.locator('.hero__shot img').boundingBox();
+    expect(heading!.y).toBeLessThan(cta!.y);
+    expect(cta!.y).toBeLessThan(shot!.y);
+    expect(shot!.width).toBeGreaterThan(300);
   });
 
   test('in-page navigation works and external links point only at the GitHub project', async ({

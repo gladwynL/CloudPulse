@@ -1,143 +1,243 @@
 # CloudPulse
 
 [![CI](https://github.com/gladwynL/CloudPulse/actions/workflows/ci.yml/badge.svg)](https://github.com/gladwynL/CloudPulse/actions/workflows/ci.yml)
+[![Showcase](https://github.com/gladwynL/CloudPulse/actions/workflows/pages.yml/badge.svg)](https://github.com/gladwynL/CloudPulse/actions/workflows/pages.yml)
 
-**CloudPulse** is a cloud monitoring and observability platform being built as a
-production-style engineering project: health checks, uptime and latency tracking,
-alerting, and incident management for cloud services, with a React dashboard on top.
+**CloudPulse** is a monitoring, alerting and incident-management platform for HTTP services. A
+dedicated worker checks your services on a schedule; every result is stored as history with
+availability and latency statistics; alert rules turn bad checks into incidents that you acknowledge
+and that resolve themselves on recovery. Backend in **Python / FastAPI / PostgreSQL**, dashboard in
+**React / TypeScript**, everything started with one `docker compose up`.
 
-> **Current status: Phase 5 — Zero-cost deployment and infrastructure readiness.**
-> CloudPulse monitors HTTP services on a schedule, keeps their history, evaluates alert rules and
-> manages incidents, with a React dashboard on top (Phases 1 to 4). Phase 5 makes it **repeatable and
-> safe to run**: a hardened production-style local stack where only the web entry point is published,
-> tested database backup, verification and restore, verified startup and worker-outage behaviour,
-> stronger CI, and a **static public showcase** page for GitHub Pages.
->
-> **The monitoring backend runs locally and is not publicly hosted.** It has no authentication, so
-> exposing it would be unsafe. The public page is a static showcase, not a live deployment. Nothing
-> in this project uses a paid service or a cloud account; a cloud deployment is documented as a future
-> design only. See [Deployment](#deployment-local-production-style).
->
-> **Not implemented:** notifications (email, chat, webhooks, paging), authentication, and any cloud
-> deployment. See the [roadmap](#roadmap).
+**[View the public showcase](https://gladwynl.github.io/CloudPulse/)** · [Source](https://github.com/gladwynL/CloudPulse) · [Quick start](#quick-start) · [Architecture](#architecture)
 
----
+> **What is public and what is not.** The showcase above is a **static page** (real screenshots, no
+> scripts, no API). The application itself runs **locally** and is **not hosted publicly**: it has no
+> authentication yet, so it is deliberately not exposed to a network. Nothing in this project uses a
+> cloud account or a paid service. See [Security and limitations](#security-and-limitations).
+
+![The CloudPulse overview: health counts, active incidents and services by severity](docs/screenshots/overview.png)
+
+|  |  |
+| --- | --- |
+| ![A resource's availability and latency charts and check history](docs/screenshots/resource-detail.png) | ![An incident with its triggering check and timeline](docs/screenshots/incident-detail.png) |
+| *Per-resource availability, latency percentiles and history* | *An incident: trigger, rule and timeline* |
+
+All screenshots are of the real application with synthetic services (`docs/screenshots/`).
 
 ## Contents
 
-- [Portfolio context](#portfolio-context)
-- [Capabilities](#capabilities)
-- [Architecture](#architecture)
-- [Tech stack](#tech-stack)
-- [Repository structure](#repository-structure)
-- [Prerequisites](#prerequisites)
-- [Quick start (Docker Compose)](#quick-start-docker-compose)
-- [Monitoring guide](#monitoring-guide)
-- [History and metrics](#history-and-metrics)
-- [Alerts and incidents](#alerts-and-incidents)
-- [Dashboard](#dashboard)
-- [Deployment](#deployment-local-production-style)
-- [Backup and recovery](#backup-and-recovery)
-- [Public showcase](#public-showcase-github-pages)
-- [Cloud reference architecture](#cloud-reference-architecture-design-only)
-- [Scheduling and worker design](#scheduling-and-worker-design)
-- [Network safety (SSRF)](#network-safety-ssrf)
-- [Security and deployment limitations](#security-and-deployment-limitations)
-- [Environment configuration](#environment-configuration)
-- [Local development without Docker](#local-development-without-docker)
-- [Database migrations](#database-migrations)
-- [Testing and linting](#testing-and-linting)
-- [Health and readiness endpoints](#health-and-readiness-endpoints)
-- [Continuous integration](#continuous-integration)
-- [Portability notes](#portability-notes)
-- [Roadmap](#roadmap)
+[Key capabilities](#key-capabilities) ·
+[Engineering highlights](#engineering-highlights) ·
+[Architecture](#architecture) ·
+[Technology stack](#technology-stack) ·
+[Quick start](#quick-start) ·
+[A monitoring and alerting example](#a-monitoring-and-alerting-example) ·
+[API overview](#api-overview) ·
+[Testing and CI](#testing-and-ci) ·
+[Local deployment and recovery](#deployment-local-production-style) ·
+[Security and limitations](#security-and-limitations) ·
+[Future work](#roadmap) ·
+[Reference sections](#repository-structure)
 
-## Portfolio context
+## Key capabilities
 
-CloudPulse is project #3 in a software-engineering portfolio:
+- **Monitor** HTTP(S) services on a schedule (interval, timeout, expected status), plus on-demand checks.
+- **History and metrics**: every check is kept (30 days by default); availability, min/avg/max, p50/p95
+  latency and time-bucketed series are served by the API.
+- **Alert rules**: consecutive unhealthy checks, a latency threshold, or an immediate status, each with
+  its own recovery condition.
+- **Incidents**: one per problem, acknowledged by hand, resolved automatically on recovery, with a
+  durable event timeline that outlives the resource.
+- **Dashboard**: overview, resources, charts, history, rules and incidents; responsive from a phone to
+  a wide desktop; keyboard and screen-reader accessible.
+- **Operable**: health and readiness probes, JSON logs, a hardened Compose profile, tested backup and restore.
 
-1. **DevTrack** — production-style full-stack project/issue tracker
-2. **RepoPilot** — AI-powered GitHub pull request reviewer
-3. **CloudPulse** — cloud monitoring and observability platform (this repository)
+## Engineering highlights
 
-It focuses on cloud/backend engineering: observability, monitoring architecture,
-PostgreSQL, Docker, CI/CD, production API design, configuration management, and
-deployment engineering (a zero-cost local deployment, with a cloud design documented but not provisioned).
+These are the parts worth reading the code for.
 
-## Capabilities
-
-| Capability | Status |
-| --- | --- |
-| Register monitored HTTP resources (URL, interval, timeout, expected status) | ✅ Phase 1 |
-| Enable / disable monitoring per resource | ✅ Phase 1 |
-| Automatic periodic HTTP checks by a dedicated worker | ✅ Phase 1 |
-| Latest health state, response time, status code, and error per resource | ✅ Phase 1 |
-| Durable history of every accepted check (atomic with the latest state) | ✅ Phase 2 |
-| Check history API (filters, keyset pagination) | ✅ Phase 2 |
-| Availability and latency summary (avg/min/max/p50/p95) | ✅ Phase 2 |
-| Time-bucketed series API (1m–1d buckets) for future charts | ✅ Phase 2 |
-| Retention cleanup of old history (default 30 days) | ✅ Phase 2 |
-| Manual on-demand checks | ✅ Phase 1 |
-| SSRF protections for user-supplied URLs | ✅ Phase 1 |
-| Structured JSON logging, health/readiness probes, Docker, CI | ✅ Phase 0 |
-| Alert rules: consecutive failures, latency threshold, immediate status | ✅ Phase 3 |
-| Deterministic evaluation with persisted counters, anti-noise streaks | ✅ Phase 3 |
-| Incident lifecycle (open, acknowledge, auto-resolve) with event timeline | ✅ Phase 3 |
-| Notifications (email, chat, webhooks, paging), escalation | Not planned yet |
-| React dashboard: overview, resources, charts, history, rules, incidents | ✅ Phase 4 |
-| Hardened production-style local stack (single published port, read-only containers) | ✅ Phase 5 |
-| Database backup, isolated verification and safe restore | ✅ Phase 5 |
-| Static public showcase (GitHub Pages workflow, validated build) | ✅ Phase 5 (goes live when Pages is enabled) |
-| Cloud reference architecture | 📄 Design document only (nothing provisioned) |
-| Browser end-to-end tests against the Docker stack | ✅ Phase 4 |
-| Cloud deployment (Azure or another provider), infrastructure-as-code | Not done: needs authentication and a budget decision first |
+- **PostgreSQL-based check leases.** The worker claims due resources with
+  `FOR UPDATE SKIP LOCKED` and stamps a lease token and expiry on the row, so a check never runs twice
+  and a crashed worker's checks are reclaimed when the lease expires. No queue, Redis or Celery.
+- **SSRF defence with DNS-rebinding protection.** The URL is validated when saved, and the *resolved*
+  addresses are checked and pinned at connect time: the client connects to the validated literal and
+  never re-resolves the name, so a DNS answer that changes between check and connect cannot reach a
+  private or cloud-metadata address. TLS is verified, redirects are not followed, and errors are
+  sanitized. ([details](#network-safety-ssrf))
+- **One transaction per check.** The latest state, the history row, the alert-rule counters and any
+  incident are written atomically, with a fixed lock order (resource, rules, incidents). A crash or
+  restart cannot leave a result without its history, or a counter without its check.
+- **Incident deduplication enforced by the database.** A partial unique index allows at most one active
+  (open or acknowledged) incident per rule, a backstop behind the application's row lock; concurrency
+  tests exercise it against real PostgreSQL.
+- **A deterministic recovery state machine.** Rule evaluation is a pure function of persisted counters
+  (failure streak, recovery streak), so restarts, reconfiguration and replays behave identically.
+- **Honest availability.** Availability is *check-based* (healthy checks over checks that ran), labelled
+  as such everywhere, with gaps in charts shown as gaps, never as downtime.
+- **Hardened, verified deployment.** A Compose profile publishes only the web port on loopback, runs
+  read-only containers with capabilities dropped, and serves the API through an nginx proxy. Startup
+  order, a database outage under a running worker, and profile switching were exercised end to end.
+- **Real browser end-to-end tests.** Playwright drives the actual dashboard against the Docker stack
+  through the whole loop (add a service, break it, see the incident, acknowledge, fix, resolve, delete),
+  fails on any console error, and runs axe-core WCAG checks.
+- **Backups that are proven, not assumed.** `scripts/db_backup.py` writes checksummed backups, verifies
+  them by restoring into a disposable container, and can only restore into a new or empty database.
 
 ## Architecture
 
+```mermaid
+flowchart LR
+  subgraph PUBLIC["Public, static, free: GitHub Pages"]
+    PAGES["Showcase site<br/>HTML + CSS, real screenshots<br/>no scripts, no API"]
+  end
+  subgraph CI["GitHub Actions, free runners"]
+    GHA["lint, audits, tests,<br/>smoke test, browser E2E,<br/>hardened-stack job"]
+  end
+  subgraph LOCAL["Local application: Docker Compose, 127.0.0.1 only, NOT hosted publicly"]
+    BR["Browser<br/>React dashboard"] -->|"same origin"| NG["nginx<br/>static files + /api proxy"]
+    NG --> API["FastAPI API"]
+    API --> PG[("PostgreSQL<br/>state, history, leases,<br/>alert counters, incidents")]
+    WK["Monitoring worker"] -->|"claim due checks (leases)"| PG
+    WK -->|"HTTP GET, SSRF-guarded"| TG["Monitored HTTP services"]
+    WK -->|"one transaction: result, history,<br/>alert state, incident"| PG
+    MG["migrate job"] -->|"alembic upgrade head"| PG
+  end
+  GHA -. "builds and deploys" .-> PAGES
+  GHA -. "tests" .-> LOCAL
 ```
-                         ┌────────────────────────────┐
-Browser ─► frontend ───► │ backend (FastAPI)          │ ──┐
- (React dashboard)    │  /health /ready            │   │
-                         │  /api/v1/resources...      │   ▼
-curl / Swagger ────────► │  manual checks (HTTP out)  │  PostgreSQL ◄──┐
-                         └────────────────────────────┘  (resources +  │
-                                                          leases)      │
- migrate (one-shot: alembic upgrade head) ─────────────────►           │
-                                                                       │
-                         ┌────────────────────────────┐                │
-                         │ worker (python -m app.worker) ──────────────┘
-                         │  polls for due resources,  │
-                         │  runs checks (HTTP out)    │ ──► monitored services
-                         └────────────────────────────┘
+
+- **api** (FastAPI): resource, history, metrics, alert-rule and incident endpoints plus probes. It never
+  polls; it checks only when asked (a manual check).
+- **worker**: the single polling process, same image as the API. Claims due resources, checks them with
+  bounded concurrency, and persists the outcome together with alert evaluation. Also runs retention.
+- **db** (PostgreSQL 17): the source of truth for configuration, latest state, scheduling and leases,
+  history, rules and incidents.
+- **migrate**: a one-shot job; the API and worker start only after it succeeds.
+- **frontend**: static React build served by nginx, which also proxies `/api`, `/health` and `/ready`
+  to the API in the hardened profile.
+
+Layering inside `backend/app/`: `api` (HTTP) → `services` (rules) → `repositories` (SQL), with
+`monitoring` (checker, SSRF policy, scheduler) and `alerting` (pure evaluator, engine) shared by the API
+and worker. The public showcase and the application are completely separate: the page makes no network
+calls and has no way to reach a local backend. More: [`docs/architecture.md`](docs/architecture.md); a
+*design-only* cloud variant: [`docs/cloud-reference-architecture.md`](docs/cloud-reference-architecture.md).
+
+## Technology stack
+
+| Area | Technology |
+| --- | --- |
+| Backend | Python 3.12, FastAPI, SQLAlchemy 2, Alembic, psycopg 3, Pydantic Settings, httpx |
+| Database | PostgreSQL 17 |
+| Frontend | React 19, TypeScript, Vite, React Router, TanStack Query, Recharts |
+| Testing | Pytest (real PostgreSQL), Vitest + Testing Library, Playwright, axe-core |
+| Quality | Ruff, ESLint, Prettier, `pip-audit`, `npm audit` |
+| Infrastructure | Docker, Docker Compose, nginx, GitHub Actions, GitHub Pages |
+
+## Quick start
+
+You need **Git** and **Docker** (Python 3.12 only for the helper scripts).
+
+```bash
+git clone https://github.com/gladwynL/CloudPulse.git
+cd CloudPulse
+python scripts/init_env.py                       # creates .env with a generated database password
+docker compose up --build --detach --wait
 ```
 
-- **backend** — FastAPI app (`create_app()` factory). Serves the resource API and probes.
-  It never polls; it only performs a check when asked to (manual check).
-- **worker** — the single polling process. Same Docker image as the backend, different
-  command. Claims due resources from PostgreSQL, checks them with bounded concurrency,
-  and stores each result (latest state + history row, atomically). It also runs the
-  retention cleanup loop.
-- **db** — PostgreSQL 17. It is the source of truth for configuration, latest results,
-  scheduling state (`next_check_at` plus a per-resource lease), **and check history**
-  (`resource_check_results`).
-- **migrate** — one-shot job that applies Alembic migrations before backend and worker start.
-- **frontend** — the React dashboard, built to static files and served by nginx. It talks to the
-  backend API directly from the browser (see [Dashboard](#dashboard)).
+Open **http://localhost:3000** for the dashboard (API docs at http://localhost:8000/docs). To try it with
+something to monitor, start the bundled demo target and follow the
+[demo walkthrough](#try-it-with-the-demo-target). Useful commands:
 
-Layering inside `backend/app/`: `api` (HTTP) → `services` (rules) → `repositories` (SQL),
-with `monitoring` (checker, SSRF policy, executor, scheduler) shared by the API and worker.
-Design notes: [`docs/architecture.md`](docs/architecture.md).
+```bash
+docker compose ps                                 # status and health
+python scripts/smoke_test.py --docker-control     # full check, alert, incident, recovery loop (needs the demo target)
+python scripts/db_backup.py backup                # back up the database (and `verify` it, see below)
+docker compose stop                               # stop without deleting data
+```
 
-## Tech stack
+Windows PowerShell works the same (set environment variables with `$env:NAME = "value"`). The hardened
+profile, backups and the CI-identical checks are covered under
+[Deployment](#deployment-local-production-style) and [Backup and recovery](#backup-and-recovery).
 
-| Area           | Technology                                                                 |
-| -------------- | -------------------------------------------------------------------------- |
-| Backend        | Python 3.12, FastAPI, SQLAlchemy 2, Alembic, psycopg 3, Pydantic Settings, httpx |
-| Database       | PostgreSQL 17                                                              |
-| Frontend       | React 19, TypeScript, Vite, React Router, TanStack Query, Recharts         |
-| Testing        | Pytest (+ anyio) ; Vitest + Testing Library ; Playwright (browser E2E)    |
-| Code quality   | Ruff (lint + format); ESLint + Prettier                                    |
-| Infrastructure | Docker, Docker Compose, GitHub Actions                                     |
+## A monitoring and alerting example
+
+With the demo target running (see the walkthrough below), register a service that answers `404`, which
+CloudPulse reports as *degraded*, and open an incident after two bad checks in a row:
+
+```bash
+curl -s -X POST localhost:8000/api/v1/resources -H 'Content-Type: application/json' \
+  -d '{"name":"reports","url":"http://demo-target:8080/missing","check_interval_seconds":10}'
+# note the "id", then:
+curl -s -X POST localhost:8000/api/v1/resources/<id>/alert-rules -H 'Content-Type: application/json' \
+  -d '{"name":"Two unhealthy checks","rule_type":"CONSECUTIVE_FAILURES","consecutive_failures":2,"recovery_successes":2}'
+curl -s "localhost:8000/api/v1/incidents?active=true"      # the incident appears after about 20 seconds
+```
+
+Acknowledge it (`POST /api/v1/incidents/<id>/acknowledge`), change the resource's expected status to
+`404` (or point it at `/`) and it resolves automatically after two healthy checks, with a timeline of
+`OPENED`, `ACKNOWLEDGED` and `RECOVERED`. The dashboard shows all of this live; the browser test
+`frontend/e2e/workflow.spec.ts` does exactly this loop.
+
+## API overview
+
+REST under `/api/v1` (interactive docs at `/docs` in the development stack), with a consistent
+`{"detail": ...}` error envelope, validated inputs, bounded pagination (offset for lists, keyset cursors
+for history and incidents) and UTC ISO-8601 timestamps.
+
+| Area | Endpoints |
+| --- | --- |
+| Resources | `GET/POST /resources`, `GET/PATCH/DELETE /resources/{id}`, `POST /resources/{id}/check` |
+| History and metrics | `GET /resources/{id}/checks`, `/metrics/summary`, `/metrics/timeseries` |
+| Alert rules | `GET /alert-rules`, `GET/POST /resources/{id}/alert-rules`, `PATCH/DELETE /alert-rules/{id}` |
+| Incidents | `GET /incidents`, `GET /incidents/{id}`, `POST /incidents/{id}/acknowledge`, `GET /incidents/{id}/events` |
+| Overview and probes | `GET /overview`, `GET /health`, `GET /ready` |
+
+The detailed semantics are in the [monitoring guide](#monitoring-guide),
+[history and metrics](#history-and-metrics) and [alerts and incidents](#alerts-and-incidents) sections.
+
+## Testing and CI
+
+| Layer | What | Count / tool |
+| --- | --- | --- |
+| Backend | unit and PostgreSQL integration tests (leases, atomicity, alert concurrency, retention, SSRF, deployment tooling) | 764 tests, Pytest |
+| Frontend | components, API-client contract (404/409/422/503/network), forms, pages, charts, routing | 225 tests, Vitest + Testing Library |
+| Browser | the full workflow, outage behaviour, responsive layout, WCAG A/AA (axe-core), the showcase site | 38 tests, Playwright |
+| Stack | check, alert, incident, restart-recovery loop on real containers | `scripts/smoke_test.py` |
+
+CI runs on free GitHub-hosted runners: backend (lint, `pip-audit`, migrations, tests), frontend (lint,
+`npm audit`, types, tests, build), the development stack (smoke test and browser tests), and a hardened
+stack job (port audit, smoke test through the proxy, backup verification, browser tests). Details:
+[Testing and linting](#testing-and-linting) and [Continuous integration](#continuous-integration).
+
+## Security and limitations
+
+- **No authentication or authorization.** Anyone who can reach the dashboard or API can change or delete
+  data and trigger outbound checks. The stack therefore binds to `127.0.0.1` (the hardened profile
+  publishes only the web port) and is for a trusted machine. Loopback binding limits who can reach it; it
+  is not authentication. **Authentication and authorization are prerequisites for any public backend,
+  and this project does not claim to be safe for public SaaS use.**
+- The public showcase is static and cannot reach the local backend.
+- Notifications (email, chat, webhooks) are **not implemented**; incidents are read in the dashboard or API.
+- Availability is check-based, not continuous uptime. One worker; no clustering. No multi-tenancy.
+- No cloud deployment exists, and none was paid for; a design-only reference lives in `docs/`.
+- Measurements in this README were taken on one laptop and are not production benchmarks.
+
+Full details: [Security and deployment limitations](#security-and-deployment-limitations).
+
+## Future work
+
+Authentication and authorization (the gate for any public backend); notification delivery, designed to
+read `incident_events` outside the check transaction; multi-worker load testing; downsampled long-term
+history. See the [roadmap](#roadmap).
+
+---
+
+## Reference
+
+The sections below are the detailed reference: repository layout, setup, the monitoring, metrics and
+alerting semantics, the dashboard, deployment, backup and recovery, the showcase, security details,
+configuration, development without Docker, migrations, testing, CI, portability and the roadmap.
 
 ## Repository structure
 
@@ -183,11 +283,9 @@ CloudPulse/
 
 Only Git and Docker are required to run the stack.
 
-## Quick start (Docker Compose)
+## Docker Compose reference
 
 ```bash
-git clone https://github.com/gladwynL/CloudPulse.git
-cd CloudPulse
 python scripts/init_env.py    # creates .env with a generated database password (never overwrites)
 docker compose up --build
 ```
@@ -212,20 +310,6 @@ docker compose logs -f backend      # follow API logs
 docker compose run --rm migrate     # re-run migrations
 docker compose down                 # stop (data is kept)
 docker compose down -v              # stop and DELETE the local database volume
-```
-
-For the hardened production-style profile, backups and the CI-identical checks, see
-[Deployment](#deployment-local-production-style) and [Backup and recovery](#backup-and-recovery).
-Quick reference:
-
-```bash
-python scripts/init_env.py                                   # first-time .env
-docker compose up --build --detach --wait                    # start (add -f docker-compose.hardened.yml for hardened)
-docker compose ps && curl http://localhost:8000/health       # health (hardened: http://localhost:3000/health)
-python scripts/smoke_test.py --docker-control                # full-loop check (needs the demo target, below)
-python scripts/db_backup.py backup                           # back up the database
-python scripts/db_backup.py verify backups/<file>.dump       # prove the backup restores (disposable container)
-docker compose stop                                          # stop without deleting data
 ```
 
 ### Try it with the demo target
@@ -1014,7 +1098,7 @@ resource at a 5-second interval. These are measurements, not promises.
 | --- | --- |
 | The complete application on the developer's machine, with Docker Compose | **Implemented and verified** |
 | Hardened local profile, backup and restore tooling, startup and recovery behaviour | **Implemented and verified** |
-| A public static showcase on GitHub Pages | **Workflow implemented and tested locally; goes live when the owner enables Pages** (see below) |
+| A public static showcase on GitHub Pages | **Live and verified**: <https://gladwynl.github.io/CloudPulse/> |
 | A public or cloud-hosted backend (API, worker, database) | **Not implemented, on purpose** |
 | Cloud reference architecture | **Designed and documented only**: [`docs/cloud-reference-architecture.md`](docs/cloud-reference-architecture.md) |
 
@@ -1117,15 +1201,12 @@ minimal permissions (`contents: read`; `pages: write` and `id-token: write` only
 official GitHub actions, a standard hosted runner, and a one-day artifact. Hosting on the free
 `github.io` address of a public repository costs nothing; no custom domain is involved.
 
-The deploy job is **off until the repository owner enables Pages**, so `main` stays green. Two one-time
-steps in the repository settings (admin rights are needed; the workflow cannot do this itself):
-
-1. **Settings, Pages, Build and deployment, Source: "GitHub Actions".**
-2. **Settings, Secrets and variables, Actions, Variables:** add `PAGES_ENABLED` with the value `true`.
-
-Then re-run the workflow (Actions, Showcase, Run workflow). The site appears at
-`https://gladwynl.github.io/CloudPulse/`. If GitHub ever asks for payment details to do this, stop:
-nothing in this project requires it.
+The showcase is **live at <https://gladwynl.github.io/CloudPulse/>** and redeploys automatically when
+`site/`, the screenshots or the build script change on `main`. It needs two repository settings (admin
+rights; both are in place for this repository, and a fork must set them itself): **Settings, Pages,
+Source: "GitHub Actions"**, and a repository variable **`PAGES_ENABLED=true`** (Settings, Secrets and
+variables, Actions, Variables). Without them the build job still validates the site and the deploy job is
+skipped. If GitHub ever asks for payment details for this, stop: nothing in this project requires it.
 
 ## Cloud reference architecture (design only)
 
@@ -1329,7 +1410,7 @@ hardened stack (API only through nginx), point both addresses at its single port
 history, create a rule, break the resource so an incident opens, view and acknowledge it, fix it and
 watch it resolve, delete the resource); resilience (unreachable API, 503, unknown ids); and layout
 (no horizontal overflow at 375, 430, 768, 1024, 1440 and 1920 px, drawer, dialogs, keyboard focus,
-reduced motion); and the static showcase served under `/CloudPulse/` (no stack needed). Every test also fails on any browser console error, uncaught exception, or request
+reduced motion); accessibility (axe-core WCAG 2.1 A/AA over every page and both dialogs on desktop and phone, plus focus management, status-not-by-colour, touch-target size and 200% text size); and the static showcase served under `/CloudPulse/` (no stack needed). Every test also fails on any browser console error, uncaught exception, or request
 to a host other than the dashboard and the API.
 
 The tests create and delete only resources they name `e2e-…`, and never stop the shared demo
@@ -1368,7 +1449,7 @@ are kept for 3 days.
   a database backup and verifies it in a disposable database, then runs the whole Playwright suite against
   the proxy-only stack.
 - **Showcase** ([`pages.yml`](.github/workflows/pages.yml)): builds and validates the static site on every
-  change to it, and deploys it to GitHub Pages once the owner has enabled Pages (see
+  change to it, and deploys it to GitHub Pages from `main` (see
   [Publishing](#publishing)).
 
 Nothing else is deployed.
@@ -1398,8 +1479,8 @@ Nothing else is deployed.
 | 2 | Metrics ingestion and history: atomic per-check records, availability/latency APIs, time series, retention | Done |
 | 3 | Alerting and incidents: rules, deterministic evaluation, incident lifecycle and timeline | Done |
 | 4 | Monitoring dashboard: React UI over every API, charts, browser E2E tests | Done |
-| 5 | Zero-cost deployment readiness: hardened local stack, backup and restore, CI hardening, static showcase, cloud reference design (no cloud resources) | **Current** |
-| 6 | To be decided with the owner. Candidates: authentication (a prerequisite for any public backend), notifications | Not started |
+| 5 | Zero-cost deployment readiness: hardened local stack, backup and restore, CI hardening, static showcase, cloud reference design (no cloud resources) | Done |
+| 6 | Final polish and production-readiness audit: responsive tables, accessibility fixes and automated WCAG checks, showcase redesign, refreshed screenshots, README and diagrams | **Current (final planned phase)** |
 
 Phase boundaries beyond the current phase are provisional and refined as each phase begins.
 ### Considerations for later phases

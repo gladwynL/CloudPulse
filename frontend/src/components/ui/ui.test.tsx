@@ -15,6 +15,7 @@ import { ConfirmDialog, Modal } from './Dialog.tsx';
 import { LoadMore, OffsetPager } from './Pager.tsx';
 import { EmptyState, ErrorState, LoadingState, Notice } from './States.tsx';
 import { useToast } from './useToast.ts';
+import { waitFor } from '@testing-library/react';
 
 describe('status badges', () => {
   it('always carry a text label, not just a colour', () => {
@@ -282,5 +283,29 @@ describe('toasts', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(() => render(<Trigger />)).toThrow(/ToastProvider/);
     log.mockRestore();
+  });
+});
+
+describe('Modal focus', () => {
+  it('moves focus to the first form field, so a person can start typing', async () => {
+    render(
+      <Modal open onClose={() => {}} title="A form">
+        <div className="dialog__body">
+          <label htmlFor="first">First</label>
+          <input id="first" />
+        </div>
+      </Modal>,
+    );
+    await waitFor(() => expect(screen.getByLabelText('First')).toHaveFocus());
+  });
+
+  it('leaves focus on the dialog itself when there is no field (a confirmation)', () => {
+    render(
+      <ConfirmDialog open title="Sure?" confirmLabel="Yes" onConfirm={() => {}} onCancel={() => {}}>
+        Really?
+      </ConfirmDialog>,
+    );
+    // No input is focused; the native dialog decides (it focuses its first control).
+    expect(document.activeElement?.tagName).not.toBe('INPUT');
   });
 });

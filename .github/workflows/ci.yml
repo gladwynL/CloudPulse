@@ -43,9 +43,9 @@ jobs:
       TEST_DATABASE_URL: postgresql+psycopg://cloudpulse:ci-only-password@127.0.0.1:5432/cloudpulse_ci
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -84,9 +84,9 @@ jobs:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -125,7 +125,7 @@ jobs:
       MONITORING_ALLOWED_LOCAL_HOSTS: demo-target:8080
       MONITORING_MIN_INTERVAL_SECONDS: "5"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate Compose files (development and hardened)
         run: |
@@ -141,7 +141,7 @@ jobs:
       - name: End-to-end smoke test
         run: python scripts/smoke_test.py --docker-control
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -161,7 +161,7 @@ jobs:
 
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: frontend/test-results
@@ -193,9 +193,9 @@ jobs:
       E2E_BASE_URL: http://localhost:3000
       E2E_API_URL: http://localhost:3000
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -219,7 +219,7 @@ jobs:
           python scripts/db_backup.py backup --output-dir "$RUNNER_TEMP/backups"
           python scripts/db_backup.py verify "$RUNNER_TEMP/backups"/*.dump
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -237,7 +237,7 @@ jobs:
 
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-hardened-test-results
           path: frontend/test-results

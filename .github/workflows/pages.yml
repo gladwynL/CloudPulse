@@ -4,10 +4,11 @@ name: Showcase (GitHub Pages)
 # docs/screenshots/). It never builds or publishes the application, the API, any configuration or
 # any backups. Free for a public repository on standard GitHub-hosted runners.
 #
-# One-time owner setup (needs repository admin; see README "Public showcase"):
+# Live at https://gladwynl.github.io/CloudPulse/ . Deployment needs two repository settings, both
+# already in place (a fork must set them itself; admin rights are required):
 #   1. Settings > Pages > Build and deployment > Source: "GitHub Actions"
-#   2. Settings > Secrets and variables > Actions > Variables: add PAGES_ENABLED = true
-# Until then the build job still validates the site on every change and the deploy job is skipped.
+#   2. Settings > Secrets and variables > Actions > Variables: PAGES_ENABLED = true
+# Without them the build job still validates the site on every change and the deploy job is skipped.
 
 on:
   push:
@@ -38,9 +39,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -51,7 +52,7 @@ jobs:
 
       - name: Upload the Pages artifact
         if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: _site
           retention-days: 1
@@ -71,4 +72,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
